@@ -2,3 +2,14 @@
 /trash/runs-fix-okay-ma-no-competition/
 /trash/runs-le-prime/
 biovil_image_resnet50_proj_size_128.pt
+/trash/downloaded_chest_xray.jpg
+/trash/default_zer_shot.py
+/trash/lower_bound_NO_mcs.py
+/trash/main.py
+/trash/test_image_model.py
+/trash/test_image_model_freeze.py
+/trash/test_image_model_on_chexpert.py
+/trash/test_text_model.py
+/trash/test_train_embeddings.py
+/trash/zero-shot-chexpert.py
+/model-no_shuffle-troll/
