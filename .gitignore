@@ -14,3 +14,4 @@ biovil_image_resnet50_proj_size_128.pt
 /trash/zero-shot-chexpert.py
 /model-no_shuffle-troll/
 /.idea/
+/embeddingDataset/
