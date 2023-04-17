@@ -65,7 +65,7 @@ if __name__ == '__main__':
         prompts = create_prompts(prompt_names)
 
     print("img size:", img_size)
-    print("basic_prompts:", basic_prompts)
+    print("single_prompts:", basic_prompts)
     print("do_writer:", do_writer)
     with torch.no_grad():
         for images, labels in tqdm(chexpert_loader, desc="Evaluating Zero-shot on chexpert"):

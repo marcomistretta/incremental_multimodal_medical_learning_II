@@ -51,11 +51,11 @@ class BertProjectionHead(nn.Module):
 
 class CXRBertModel(BertForMaskedLM):
     """
-    Implements the CXR-BERT model outlined in the manuscript:
+    Implements the CXR-BERT image_adapter outlined in the manuscript:
     Boecking et al. "Making the Most of Text Semantics to Improve Biomedical Vision-Language Processing", 2022
     https://link.springer.com/chapter/10.1007/978-3-031-20059-5_1
 
-    Extends the HuggingFace BertForMaskedLM model by adding a separate projection head. The projection "[CLS]" token is
+    Extends the HuggingFace BertForMaskedLM image_adapter by adding a separate projection head. The projection "[CLS]" token is
     used to align the latent vectors of image and text modalities.
     """
 

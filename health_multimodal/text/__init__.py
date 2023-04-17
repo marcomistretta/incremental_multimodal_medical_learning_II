@@ -22,7 +22,7 @@
    io
 
 
-.. currentmodule:: health_multimodal.text.model
+.. currentmodule:: health_multimodal.text.image_adapter
 
 .. autosummary::
    :toctree:

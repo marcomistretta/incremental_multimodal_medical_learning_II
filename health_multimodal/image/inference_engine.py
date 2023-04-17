@@ -20,14 +20,14 @@ TypeShape2D = Tuple[int, int]
 
 class ImageInferenceEngine:
     """
-    Encapsulate inference-time operations on an image model.
+    Encapsulate inference-time operations on an image image_adapter.
     """
 
     def __init__(self, image_model: ImageModel, transform: Compose):
         """
-        :param img_model: Trained image model
+        :param img_model: Trained image image_adapter
         :param transform: Transform to apply to the image after loading. Must return a torch.Tensor that can be
-            input directly to the image model.
+            input directly to the image image_adapter.
         """
 
         assert isinstance(image_model, ImageModel), f"Expected an ImageModel, got {type(image_model)}"

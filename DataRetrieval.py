@@ -72,7 +72,7 @@ class CustomDataset(Dataset):
         self.img_labels = pd.read_csv(annotations_file)
         self.img_dir = img_dir
         self.transform = transform
-        self.dataset = dataset
+        # self.dataset = dataset xxx ultima modifica
 
         self.file_extension = ""
         # self.label_names = ['Pleural Effusion', 'Pneumothorax', 'Atelectasis', 'Pneumonia', 'Consolidation']
@@ -90,9 +90,9 @@ class CustomDataset(Dataset):
         if self.transform:
             image = self.transform(image)
         # plotImage(image) todo fix
-        if self.dataset == "chexpert":
-            label = torch.tensor(self.img_labels.loc[idx, self.label_names].values.astype(np.float32))
-            # print(label)
+        # if self.dataset == "chexpert": xxx ultima modifica
+        label = torch.tensor(self.img_labels.loc[idx, self.label_names].values.astype(np.float32))
+        # print(label)
 
         return image, label
 
@@ -122,13 +122,12 @@ def _debug_info(dataset, labels_dir, img_dir, batch_size, perc_dataset, size, s)
     print("batch size:", batch_size)
     print("size of reformat:", size)
 
-    if s != 0:
-        print("color distortion intensity:", s)
+    print("color distortion intensity:", s)
 
 
 class DataRetrieval:
 
-    def __init__(self, dataset, labels_dir, img_dir, batch_size, perc_dataset=1, size=224, s=0.5, verbose=False,
+    def __init__(self, dataset, labels_dir, img_dir, batch_size, perc_dataset=1, size=512, s=0, verbose=False,
                  num_workers=4):
         # self.normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                                       std=[0.229, 0.224, 0.225])
@@ -184,6 +183,7 @@ def get_bio_vil_pipeline(size):
 
 
 def basic_create_prompts(class_list):
+    print("*** Basic Prompting ***")
     prompts = {}
     for c in class_list:
         prompts[c] = {
@@ -194,6 +194,7 @@ def basic_create_prompts(class_list):
 
 
 def create_prompts(class_list):
+    print("*** Multiple Prompting ***")
     prompts = {}
     for c in class_list:
         prompts[c] = {

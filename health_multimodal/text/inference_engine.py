@@ -18,7 +18,7 @@ class TextInferenceEngine(TextInput):
     sentence embedding, similarity and MLM prediction tasks.
 
     :param tokenizer: A BertTokenizer object.
-    :param text_model: Text model either default HuggingFace class
+    :param text_model: Text image_adapter either default HuggingFace class
     """
 
     def __init__(self, tokenizer: BertTokenizer, text_model: BertForMaskedLM) -> None:
@@ -31,7 +31,7 @@ class TextInferenceEngine(TextInput):
         self.to = self.model.to
 
     def is_in_eval(self) -> bool:
-        """Returns True if the model is in eval mode."""
+        """Returns True if the image_adapter is in eval mode."""
         return not self.model.training
 
     def tokenize_input_prompts(self, prompts: Union[str, List[str]], verbose: bool = True) -> Any:

@@ -13,9 +13,9 @@ TRANSFORM_CENTER_CROP_SIZE = 480
 
 
 def get_biovil_resnet_inference() -> ImageInferenceEngine:
-    """Create a :class:`ImageInferenceEngine` for the image model.
+    """Create a :class:`ImageInferenceEngine` for the image image_adapter.
 
-    The model is downloaded from the Hugging Face Hub.
+    The image_adapter is downloaded from the Hugging Face Hub.
     The engine can be used to get embeddings from text prompts or masked token predictions.
     """
     image_model = get_biovil_resnet()

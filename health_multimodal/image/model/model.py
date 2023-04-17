@@ -34,7 +34,7 @@ BIOVIL_IMAGE_WEIGHTS_MD5 = "02ce6ee460f72efd599295f440dbb453"
 
 
 def _download_biovil_image_model_weights() -> Path:
-    """Download image model weights from Hugging Face.
+    """Download image image_adapter weights from Hugging Face.
 
     More information available at https://huggingface.co/microsoft/BiomedVLP-CXR-BERT-specialized.
     """
@@ -49,7 +49,7 @@ def _download_biovil_image_model_weights() -> Path:
 
 
 # def get_biovil_resnet(pretrained: bool = True) -> ImageModel:
-#     """Download weights from Hugging Face and instantiate the image model."""
+#     """Download weights from Hugging Face and instantiate the image image_adapter."""
 #     resnet_checkpoint_path = _download_biovil_image_model_weights() if pretrained else None
 #
 #     image_model = ImageModel(
@@ -59,7 +59,7 @@ def _download_biovil_image_model_weights() -> Path:
 #     )
 #     return image_model
 def get_biovil_resnet(pretrained) -> ImageModel:
-    """Download weights from Hugging Face and instantiate the image model."""
+    """Download weights from Hugging Face and instantiate the image image_adapter."""
     # resnet_checkpoint_path = _download_biovil_image_model_weights() if pretrained else None
 
     image_model = ImageModel(
@@ -120,7 +120,7 @@ class ImageModel(nn.Module):
         # debugger = None
 
     # def train(self, mode: bool = True) -> Any:
-    #     """Switch the model between training and evaluation modes."""
+    #     """Switch the image_adapter between training and evaluation modes."""
     #     super().train(mode=mode)
     #     if self.freeze_encoder:
     #         print("freezing resnet encoder and projector")
@@ -129,7 +129,7 @@ class ImageModel(nn.Module):
     #     return self
     # TODO ho cambiato train
     def train(self, mode: bool = True, my_freeze=False) -> Any:
-        """Switch the model between training and evaluation modes."""
+        """Switch the image_adapter between training and evaluation modes."""
         super().train(mode=mode)
         # if self.freeze_encoder:
         if my_freeze:
@@ -160,7 +160,7 @@ class ImageModel(nn.Module):
 
     @torch.no_grad()
     def get_patchwise_projected_embeddings(self, input_img: torch.Tensor, normalize: bool) -> torch.Tensor:
-        """Get patch-wise projected embeddings from the CNN model.
+        """Get patch-wise projected embeddings from the CNN image_adapter.
 
         :param input_img: input tensor image [B, C, H, W].
         :param normalize: If ``True``, the embeddings are L2-normalized.
@@ -178,7 +178,7 @@ class ImageModel(nn.Module):
 class ImageEncoder(nn.Module):
     """Image encoder trunk module for the ``ImageModel`` class.
 
-    :param img_model_type: Type of image model to use: either ``"resnet18"`` or ``"resnet50"``.
+    :param img_model_type: Type of image image_adapter to use: either ``"resnet18"`` or ``"resnet50"``.
     """
 
     def __init__(self, img_model_type: str):
@@ -189,7 +189,7 @@ class ImageEncoder(nn.Module):
     def _create_encoder(self, **kwargs: Any) -> nn.Module:
         supported = ResnetType.RESNET18, ResnetType.RESNET50
         if self.img_model_type not in supported:
-            raise NotImplementedError(f"Image model type \"{self.img_model_type}\" must be in {supported}")
+            raise NotImplementedError(f"Image image_adapter type \"{self.img_model_type}\" must be in {supported}")
         encoder_class = resnet18 if self.img_model_type == ResnetType.RESNET18 else resnet50
         encoder = encoder_class(pretrained=True, **kwargs)
         return encoder
@@ -205,7 +205,7 @@ class ImageEncoder(nn.Module):
         return avg_pooled_emb
 
     def reload_encoder_with_dilation(self, replace_stride_with_dilation: Optional[Sequence[bool]] = None) -> None:
-        """Workaround for enabling dilated convolutions after model initialization.
+        """Workaround for enabling dilated convolutions after image_adapter initialization.
 
         :param replace_stride_with_dilation: for each layer to replace the 2x2 stride with a dilated convolution
         """

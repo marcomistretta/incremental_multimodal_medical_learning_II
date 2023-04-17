@@ -31,7 +31,7 @@ import pandas as pd
 # # leggi il file CSV
 # df = pd.read_csv(input_dir)
 #
-# # seleziona solo le righe che contengono la sottostringa "frontal" nella prima colonna
+# # seleziona solo le righe che contengono la sottostringa "frontal" nella prima cc
 # df_frontal = df[df['Path'].str.contains('frontal')]
 #
 # # salva il nuovo CSV contenente solo le righe selezionate

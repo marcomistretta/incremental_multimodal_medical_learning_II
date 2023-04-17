@@ -62,8 +62,8 @@ if __name__ == '__main__':
         str_basic = "mean-"
         prompts = create_prompts(class_names)
 
-    # writer = SummaryWriter("./model/adapter-lr-" + str(lr) + "bs" + str(batch_size)+"-"+chex_str+str_basic+"-prompt")
-    writer = SummaryWriter("./model/adapter-lr-" + str(lr) + "bs" + str(batch_size)+"-"+chex_str+str_basic+"prompt")
+    # writer = SummaryWriter("./image_adapter/adapter-lr-" + str(lr) + "bs" + str(batch_size)+"-"+chex_str+str_basic+"-prompt")
+    writer = SummaryWriter("./image_adapter/adapter-lr-" + str(lr) + "bs" + str(batch_size)+"-"+chex_str+str_basic+"prompt")
 
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)

@@ -10,12 +10,12 @@ from transformers import BertConfig, BertTokenizer
 
 class CXRBertConfig(BertConfig):
     """
-    Config class for CXR-BERT model.
+    Config class for CXR-BERT image_adapter.
 
     :param projection_size: Dimensionality of the joint latent space.
     """
 
-    model_type = "cxr-bert"
+    model_type = "cxr-bert_encoder"
 
     def __init__(self, projection_size: int = 128, **kwargs: Any) -> None:
         super().__init__(**kwargs)

@@ -13,7 +13,7 @@ TypeSkipConnections = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tens
 
 
 class ResNetHIML(ResNet):
-    """Wrapper class of the original torchvision ResNet model.
+    """Wrapper class of the original torchvision ResNet image_adapter.
 
     The forward function is updated to return the penultimate layer
     activations, which are required to obtain image patch embeddings.
@@ -49,7 +49,7 @@ class ResNetHIML(ResNet):
 
 def _resnet(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[int],
             pretrained: bool, progress: bool, **kwargs: Any) -> ResNetHIML:
-    """Instantiate a custom :class:`ResNet` model.
+    """Instantiate a custom :class:`ResNet` image_adapter.
 
     Adapted from :mod:`torchvision.models.resnet`.
     """
@@ -61,20 +61,20 @@ def _resnet(arch: str, block: Type[Union[BasicBlock, Bottleneck]], layers: List[
 
 
 def resnet18(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNetHIML:
-    r"""ResNet-18 model from
+    r"""ResNet-18 image_adapter from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
 
-    :param pretrained: If ``True``, returns a model pre-trained on ImageNet.
+    :param pretrained: If ``True``, returns a image_adapter pre-trained on ImageNet.
     :param progress: If ``True``, displays a progress bar of the download to ``stderr``.
     """
     return _resnet('resnet18', BasicBlock, [2, 2, 2, 2], pretrained, progress, **kwargs)
 
 
 def resnet50(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNetHIML:
-    r"""ResNet-50 model from
+    r"""ResNet-50 image_adapter from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
 
-    :param pretrained: If ``True``, returns a model pre-trained on ImageNet
+    :param pretrained: If ``True``, returns a image_adapter pre-trained on ImageNet
     :param progress: If ``True``, displays a progress bar of the download to ``stderr``.
     """
     return _resnet('resnet50', Bottleneck, [3, 4, 6, 3], pretrained, progress, **kwargs)

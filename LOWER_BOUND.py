@@ -14,7 +14,7 @@ from health_multimodal.image import get_biovil_resnet
 from health_multimodal.text.utils import get_cxr_bert, get_cxr_bert_inference
 
 if __name__ == '__main__':
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # todo swap with right device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("running on:", device)
 
     resnet_path = "C:\\Users\\mistr\\OneDrive\\Desktop\\mcs_only_local\\hi-ml\\hi-ml-multimodal\\src\\biovil_image_resnet50_proj_size_128.pt"
@@ -38,7 +38,7 @@ if __name__ == '__main__':
         print("NO chex competition")
         class_names = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]
         chex_str = ""
-    img_size = 768
+    img_size = 512
     perc_dataset = 1
     dataset = "real"  # "small" / "real" xxx se small o real
     split = "test"  # "val" "test" "train" "val-test" xxx main cartella del writer
@@ -69,7 +69,7 @@ if __name__ == '__main__':
         prompts = create_prompts(class_names)
 
     print("img size:", img_size)
-    print("basic_prompts:", basic_prompts)
+    print("single_prompts:", basic_prompts)
     print("do_writer:", do_writer)
     with torch.no_grad():
         for images, labels in tqdm(chexpert_loader, desc="Evaluating Zero-shot on chexpert"):

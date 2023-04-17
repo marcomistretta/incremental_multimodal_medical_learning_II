@@ -24,12 +24,12 @@
    transforms
 
 
-.. currentmodule:: health_multimodal.image.model
+.. currentmodule:: health_multimodal.image.image_adapter
 
 .. autosummary::
    :toctree:
 
-   model
+   image_adapter
    modules
    resnet
 """
