@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from torch.utils.data import ConcatDataset
-from models import Adapter
+from models import myLinearModel
 import torch.utils.tensorboard as tb
 # xxx SET REPRODUCIBILITY
 # import torch

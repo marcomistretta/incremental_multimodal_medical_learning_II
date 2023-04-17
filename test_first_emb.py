@@ -13,7 +13,7 @@ from DataRetrieval import DataRetrieval
 from Trainer import Trainer
 from health_multimodal.image import get_biovil_resnet
 from health_multimodal.text.utils import get_cxr_bert_inference
-from models import Adapter
+from models import myLinearModel
 
 # xxx SET REPRODUCIBILITY
 # import torch

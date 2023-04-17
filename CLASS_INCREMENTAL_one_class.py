@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from Trainer import Trainer
 from health_multimodal.text.utils import get_cxr_bert_inference
-from models import Adapter
+from models import myLinearModel
 
 # xxx SET REPRODUCIBILITY
 # import torch
@@ -67,7 +67,7 @@ if __name__ == '__main__':
         batch_size, lr, epochs, CONTINUAL_LEARNING, threshold, ratio, tasks_order)
 
     # xxx notare che non c'è bisogno di una resnet
-    model = Adapter().to(device)
+    model = myLinearModel().to(device)
     cxr_bert = get_cxr_bert_inference()
 
     criterion = nn.BCEWithLogitsLoss()

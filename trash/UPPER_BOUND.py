@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 from torch.utils.data import ConcatDataset
-from models import Adapter
+from models import myLinearModel
 from trainer import Trainer
 import torch.utils.tensorboard as tb
 from health_multimodal.text.utils import get_cxr_bert, get_cxr_bert_inference
@@ -50,7 +50,7 @@ if __name__ == '__main__':
                                                   num_workers=4, pin_memory=True, drop_last=False)
 
     # xxx notare che non c'è bisogno di una resnet
-    model = Adapter().to(device)
+    model = myLinearModel().to(device)
 
     cxr_bert = get_cxr_bert_inference()
     if cxr_bert.is_in_eval():

@@ -23,7 +23,7 @@ from tqdm import tqdm
 from HeatMapPlotter import heatmap, annotate_heatmap
 from Trainer import Trainer
 from health_multimodal.text.utils import get_cxr_bert_inference
-from models import Adapter
+from models import myLinearModel
 
 seed_value = 27
 torch.manual_seed(seed_value)
