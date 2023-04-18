@@ -24,10 +24,13 @@ from DataRetrieval import basic_create_prompts, create_prompts
 from HeatMapPlotter import heatmap, annotate_heatmap
 from models import myLinearModel, myMLP
 
-SHARED = False  # True,  False # xxx shared ha precedenza
-IMAGE_MODEL = False  # True, False
+# zero shot o SHARED true, IMAGE true TEXT true
+# oppure con SHARED false, IMAGE false TEXT false
+SHARED = True  # True,  False # xxx shared ha precedenza (usare sempre shared true con image e text true)
+# con shared false invece si può fare che ci pare
+IMAGE_MODEL = True  # True, False
 TEXT_MODEL = True  # True, False
-MODEL_USED = "dense"  # mlp, dense
+MODEL_USED = "mlp"  # mlp, dense, "no-head"
 
 CHANGE_LABELS = False
 
@@ -80,6 +83,10 @@ class Trainer:
                 shared_model = myLinearModel().to(device)
             else:
                 print("*** ERROR... ***")
+            global IMAGE_MODEL
+            IMAGE_MODEL = True
+            global TEXT_MODEL
+            TEXT_MODEL = True
             self.image_adapter = shared_model
             self.text_adapter = shared_model
             params += list(shared_model.parameters())
@@ -114,14 +121,17 @@ class Trainer:
 
         print("image adapter", self.image_adapter)  # xxx print summary
         print("text adapter", self.text_adapter)  # xxx print summary
-        print("Creating Adam optimizer...")
-        self.optimizer = optim.Adam(params, lr=lr)
-        for param_group in self.optimizer.param_groups:
-            for name, param in param_group.items():
-                if name == 'params':
-                    print('Optimizer parameter names:')
-                    for p in param:
-                        print(p.shape)
+        if len(params)>0:
+            print("Creating Adam optimizer...")
+            self.optimizer = optim.Adam(params, lr=lr)
+            for param_group in self.optimizer.param_groups:
+                for name, param in param_group.items():
+                    if name == 'params':
+                        print('Optimizer parameter names:')
+                        for p in param:
+                            print(p.shape)
+        else:
+            self.optimizer = None
         self.val_f1_heat_map = torch.empty((0, 5))
         self.val_auroc_heat_map = torch.empty((0, 5))
         self.test_f1_heat_map = torch.empty((0, 5))
@@ -257,25 +267,31 @@ class Trainer:
         else:
             str_basic = "-mean-prompt"
             prompts = create_prompts(class_names)
-
-        suffix = "-" + MODEL_USED
-        if SHARED:
-            suffix += "-SHARED-adapter"
-        else:
-            if IMAGE_MODEL and TEXT_MODEL:
-                suffix += "-double-adapter"
-            elif IMAGE_MODEL:
-                suffix += "-only-image-adapter"
-            elif TEXT_MODEL:
-                suffix += "-only-text-adapeter"
-        w_path = "./joint-training/joint-train-loss-" + str(loss_name) + "-lr-" + str(
-            lr) + "-bs" + str(
-            batch_size) + "-ep" + str(
-            epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
+        if epochs > 0:
+            suffix = "-" + MODEL_USED
+            if SHARED:
+                suffix += "-SHARED-adapter"
+            else:
+                if IMAGE_MODEL and TEXT_MODEL:
+                    suffix += "-double-adapter"
+                elif IMAGE_MODEL:
+                    suffix += "-only-image-adapter"
+                elif TEXT_MODEL:
+                    suffix += "-only-text-adapeter"
+            w_path = "./joint-training/joint-train-loss-" + str(loss_name) + "-lr-" + str(
+                lr) + "-bs" + str(
+                batch_size) + "-ep" + str(
+                epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
         if epochs == 0:
+            if SHARED and IMAGE_MODEL and TEXT_MODEL:
+                suffix = "-SHARED-adapter-"+MODEL_USED
+            elif not SHARED and not IMAGE_MODEL and not TEXT_MODEL:
+                suffix = "-no-head"
+            else:
+                raise Exception
             print("Attenzione! Zero-shot evaluation!")
             w_path = "./joint-training/zero-shot-model"+ chex_str + str_basic + "-" + str(xrays_position) + suffix
-        w_path = "./joint-training/rapid_check"
+        # w_path = "./joint-training/rapid_check"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
