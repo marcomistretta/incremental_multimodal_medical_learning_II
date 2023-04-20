@@ -1,9 +1,11 @@
 import copy
 import math
+import warnings
 
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-
+from torchvision.io import read_image
+from torchvision.utils import make_grid
 from health_multimodal.text import get_cxr_bert_inference
 
 import numpy
@@ -30,11 +32,10 @@ from models import myLinearModel, myMLP
 
 # zero shot o SHARED true, IMAGE true TEXT true
 # oppure con SHARED false, IMAGE false TEXT false
-SHARED = True  # True,  False # xxx shared ha precedenza (usare sempre shared true con image e text true,
-# xxx cazzata, shared true mette gli altri due a true <3
+SHARED = False  # True,  False # xxx shared true mette gli altri due a true <3
 # con shared false invece si può fare che ci pare
-IMAGE_MODEL = True  # True, False
-TEXT_MODEL = True  # True, False
+IMAGE_MODEL = False  # True, False
+TEXT_MODEL = False  # True, False
 MODEL_USED = "mlp"  # mlp, dense, "no-head"
 
 CHANGE_LABELS = False
@@ -130,12 +131,12 @@ class Trainer:
         plt.ylabel(metric)
         plt.ylim(0, 1)
         plt.title('Class ' + metric)
-        self.writer.add_figure(mode+'/Class ' + metric, fig, epoch)
+        self.writer.add_figure(mode + ' Class-metric/Class ' + metric, fig, epoch)
         plt.clf()
         plt.close()
 
     @staticmethod
-    def preprocessing(chex_competition, xrays_position, single_prompt, batch_size, lr, epochs, loss_name):
+    def _preprocessing(chex_competition, xrays_position, batch_size):
         # xxx CHEX COMPETITION
         if chex_competition:
             print("*** CHEX COMPETITION ***")
@@ -166,6 +167,7 @@ class Trainer:
             test_dataset = torch.load(
                 "embeddingDataset\\test\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
 
+        print("TrainBS:", batch_size, "Val/Test Batch size default set to 1024")
         train_loader = torch.utils.data.DataLoader(dataset=train_dataset, sampler=None, batch_size=batch_size,
                                                    shuffle=True,
                                                    num_workers=4, pin_memory=True, drop_last=False)
@@ -175,7 +177,15 @@ class Trainer:
         test_loader = torch.utils.data.DataLoader(dataset=test_dataset, sampler=None, batch_size=1024,
                                                   shuffle=True,
                                                   num_workers=4, pin_memory=True, drop_last=False)
-        print("TrainBS:", batch_size, "Val/Test Batch size default set to 1024")
+
+        return class_names, chex_str, train_loader, val_loader, test_loader
+
+
+    @staticmethod
+    def preprocessing(chex_competition, xrays_position, single_prompt, batch_size, lr, epochs, loss_name):
+
+        class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition, xrays_position, batch_size)
+
         if single_prompt:
             str_basic = "-single-prompt"
             prompts = basic_create_prompts(class_names)
@@ -206,7 +216,8 @@ class Trainer:
                 raise Exception
             print("Attenzione! Zero-shot evaluation!")
             w_path = "./saved-bounds/zero-shot-model" + chex_str + str_basic + "-" + str(xrays_position) + suffix
-        w_path = "./joint-training/rapid_check"
+        # w_path = "./joint-training/rapid_check"
+        # w_path = w_path + "-DEBUG"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -316,9 +327,10 @@ class Trainer:
 
     # todo
     @staticmethod  # xxx prep for class incremental-two-class
-    def preprocessing_class_incremental_two_class(loss_name, chex_competition, xrays_position, basic_prompts,
-                                                  batch_size, lr,
-                                                  epochs, CONTINUAL_LEARNING, threshold, ratio, tasks_order):
+    def preprocessing_class_incremental_two_class(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+                                                  epochs, loss_name, CONTINUAL_LEARNING=None, ratio=None,
+                                                  threshold=None, tasks_order=None):
+
         if CONTINUAL_LEARNING is not None:
             print("**** Gradient Clipping ****")
             print("--->", CONTINUAL_LEARNING)
@@ -1107,7 +1119,6 @@ class Trainer:
                                        [self.class_names[i] for i in range(0, 5)], ax=ax,
                                        cmap="YlGn", cbarlabel="F1 score")
 
-
                 texts = annotate_heatmap(im, valfmt="{x:.2f}")
                 fig.tight_layout()
                 # plt.show()
@@ -1165,7 +1176,7 @@ class Trainer:
         #     self.plot_cosine_similarity_text_embs()
         #     self.plot_new_text_embeddings()
 
-        self.plot_cosine_similarity_text_embs(epoch)
+        self.plot_cosine_similarity_text_embs(epoch, epochs)
         self.plot_new_text_embeddings(epoch)
 
     @staticmethod  # xxx for class-incremental one class with intersection
@@ -1302,7 +1313,6 @@ class Trainer:
     def plot_new_text_embeddings(self, epoch):
         abbrevviations = ["ATEL-pos", "ATEL-neg", "CMG-pos", "CMG-neg", "CONS-pos", "CONS-neg",
                           "EDE-pos", "EDE-neg", "PLEF-pos", "PLEF-neg"]
-        cosine_similarity_heatmap_text_embs = torch.zeros((10, 10))  # todo
         embeddings = []
         shapes = ['o', 'v', 'o', 'v', 'o', 'v', 'o', 'v', 'o', 'v']
         class_groups = {0: 0, 1: 0, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3, 8: 4, 9: 4}
@@ -1337,6 +1347,8 @@ class Trainer:
         embeddings = torch.stack(embeddings).cpu()
 
         # xxx perform PCA on the embeddings to reduce them to 2 dimensions
+        # run block of code and catch warnings
+
         pca = PCA(n_components=2)
         reduced_embeddings = pca.fit_transform(embeddings)
 
@@ -1365,11 +1377,15 @@ class Trainer:
         fig.canvas.draw()  # draw the figure
         # image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
         # image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        self.writer.add_figure('visual-embeddings/PCA text-embs', fig)
+        self.writer.add_figure('visual-embeddings/PCA text-embs', fig, epoch)
 
         # xxx perform t-SNE on the embeddings to reduce them to 2 dimensions
-        tsne = TSNE(n_components=2, metric="euclidean")
-        reduced_embeddings = tsne.fit_transform(embeddings)
+        with warnings.catch_warnings():
+            # ignore all caught warnings
+            warnings.filterwarnings("ignore")
+            # execute code that will generate warnings
+            tsne = TSNE(n_components=2, metric="euclidean", init="pca", learning_rate="auto")
+            reduced_embeddings = tsne.fit_transform(embeddings)
         # create new Figure object
         fig = plt.figure()
 
@@ -1397,7 +1413,7 @@ class Trainer:
         # image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
         self.writer.add_figure('visual-embeddings/t-SNE text-embs', fig, epoch)
 
-    def plot_cosine_similarity_text_embs(self, epoch):
+    def plot_cosine_similarity_text_embs(self, epoch, epochs):
         '''
                Atelectasis: ATEL
                Cardiomegaly: CMG
@@ -1478,7 +1494,47 @@ class Trainer:
                            cmap="YlGn", cbarlabel="Cosine similarity heatmap" + str_prompts)
         texts = annotate_heatmap(im, valfmt="{x:.2f}")
         fig.tight_layout()
-        self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, epoch)
+        if epochs > 0 and epoch == 1:
+            img_path = 'cosine_similarity_heat_map.png'
+            # load the PNG image
+            image = read_image(img_path)
+            # convert the image to a grid
+            self.writer.add_image('visual-embeddings/cosine-similarity Heatmap text-embs', image, 0)
+
+        if epoch == 0 and epochs == 0:
+            self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, 0)
+        if epochs > 0:
+            self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, epoch)
+
+    def profIncremental(self, epoch, epochs, actual_task, threshold):
+        # at the end of the epoch, compare the updated image_adapter with the image_adapter copy
+        n_reset = 0
+        n_updated = 0
+        for (name1, param1), (name2, param2) in zip(model.named_parameters(), model_copy.named_parameters()):
+            # compare the values of the individual weights
+            diff = torch.abs(param1 - param2)
+
+            minimum = diff.min()
+            maximum = diff.max()
+            # compute the threshold value
+            to_reset = minimum + threshold * (maximum - minimum)
+            mask = diff < to_reset
+
+            n_reset += torch.sum(torch.eq(mask, True))
+            n_updated += torch.sum(torch.eq(mask, False))
+            # reset the updated weights to the old values
+            param1.data[mask] = param2.data[mask]
+        print()
+        print("number of resets:", n_reset.item(), "number of updates:", n_updated.item(), "percentage resets",
+              n_reset.item() / (n_reset.item() + n_updated.item()))
+        self.writer.add_scalar("monitor-resets/resets", n_reset.item(), (actual_task - 1) * epochs + epoch)
+        self.writer.add_scalar("monitor-resets/updates", n_updated.item(), (actual_task - 1) * epochs + epoch)
+        self.writer.add_scalar("monitor-resets/percentage resets",
+                               n_reset.item() / (n_reset.item() + n_updated.item()),
+                               (actual_task - 1) * epochs + epoch)
+
+    def model_copy(self):
+        model_copy = copy.deepcopy(model)
 
 
 def change_values(tensor):

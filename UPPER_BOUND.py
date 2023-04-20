@@ -19,7 +19,7 @@ if __name__ == '__main__':
 
     batch_size = 6144  # 4096, 6144 8192, 8192 (val e test sono settati di default a 1024 per avere dei plot meno rumorosi)
     lr = 0.0001  # 0.1  # 0.0001, 1, 30
-    epochs = 10  # 10  # todo test with epochs 1 (online scenario)
+    epochs = 10  # 10
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
     xrays_position = "all"  # "all", "frontal", "lateral"

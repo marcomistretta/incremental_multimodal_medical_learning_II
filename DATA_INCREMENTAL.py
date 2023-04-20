@@ -55,54 +55,51 @@ if __name__ == '__main__':
     threshold = 0.5  # 6e-3
     ratio = True
 
-    basic_prompts = False  # False-->multiple True-->single
+    single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
     xrays_position = "all"  # "all", "frontal", "lateral"
+    loss_name = "standard"  # standard, opzione2, opzione2variant
+
     writer, class_names, train_loader, val_loader, test_loader, prompts = Trainer.preprocessing_data_incremental(
         chex_competition,
         xrays_position,
-        basic_prompts,
+        single_prompt,
         batch_size, lr, epochs, CONTINUAL_LEARNING, threshold, ratio)
 
-    # xxx notare che non c'è bisogno di una resnet
-    model = myLinearModel().to(device)
-    cxr_bert = get_cxr_bert_inference()
 
     criterion = nn.BCEWithLogitsLoss()
-    trainer = Trainer(model, cxr_bert, prompts, class_names, device, writer)
+    trainer = Trainer(single_prompt, prompts, class_names, loss_name, lr, device, writer)
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)  # todo tune optimizer
     for epoch in range(1, epochs + 1):
         if CONTINUAL_LEARNING == "profCL":
             # make a copy of the original image_adapter before starting the training loop
             model_copy = copy.deepcopy(model)
             # define the threshold for parameter updates
-        trainer.train(train_loader[epoch - 1], optimizer, criterion, epoch, basic_prompts, CONTINUAL_LEARNING,
-                      threshold)
-        if CONTINUAL_LEARNING == "profCL":
-            # at the end of the epoch, compare the updated image_adapter with the image_adapter copy
-            n_reset = 0
-            n_updated = 0
-            for (name1, param1), (name2, param2) in zip(model.named_parameters(), model_copy.named_parameters()):
-                # compare the values of the individual weights
-                diff = torch.abs(param1 - param2)
+            trainer.train(train_loader[epoch - 1], criterion, epoch, CONTINUAL_LEARNING, threshold)
+            if CONTINUAL_LEARNING == "profCL":
+                # at the end of the epoch, compare the updated image_adapter with the image_adapter copy
+                n_reset = 0
+                n_updated = 0
+                for (name1, param1), (name2, param2) in zip(model.named_parameters(), model_copy.named_parameters()):
+                    # compare the values of the individual weights
+                    diff = torch.abs(param1 - param2)
 
-                minimum = diff.min()
-                maximum = diff.max()
-                # compute the threshold value
-                to_reset = minimum + threshold * (maximum - minimum)
-                mask = diff < to_reset
+                    minimum = diff.min()
+                    maximum = diff.max()
+                    # compute the threshold value
+                    to_reset = minimum + threshold * (maximum - minimum)
+                    mask = diff < to_reset
 
-                n_reset += torch.sum(torch.eq(mask, True))
-                n_updated += torch.sum(torch.eq(mask, False))
-                # reset the updated weights to the old values
-                param1.data[mask] = param2.data[mask]
-            print()
-            print("number of resets:", n_reset.item(), "number of updates:", n_updated.item(), "percentage resets",
-                  n_reset.item() / (n_reset.item() + n_updated.item()))
-            writer.add_scalar("monitor-resets/resets", n_reset.item(), epoch)
-            writer.add_scalar("monitor-resets/updates", n_updated.item(), epoch)
-            writer.add_scalar("monitor-resets/percentage resets", n_reset.item() / (n_reset.item() + n_updated.item()),
-                              epoch)
-        trainer.val(val_loader, optimizer, criterion, epoch, basic_prompts, epochs)
-        trainer.test(test_loader, optimizer, criterion, epoch, basic_prompts, epochs)
+                    n_reset += torch.sum(torch.eq(mask, True))
+                    n_updated += torch.sum(torch.eq(mask, False))
+                    # reset the updated weights to the old values
+                    param1.data[mask] = param2.data[mask]
+                print()
+                print("number of resets:", n_reset.item(), "number of updates:", n_updated.item(), "percentage resets",
+                      n_reset.item() / (n_reset.item() + n_updated.item()))
+                writer.add_scalar("monitor-resets/resets", n_reset.item(), epoch)
+                writer.add_scalar("monitor-resets/updates", n_updated.item(), epoch)
+                writer.add_scalar("monitor-resets/percentage resets", n_reset.item() / (n_reset.item() + n_updated.item()),
+                                  epoch)
+        trainer.val(val_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
+        trainer.test(test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
