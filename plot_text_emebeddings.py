@@ -77,7 +77,6 @@ if __name__ == '__main__':
     else:
         prompts = basic_create_prompts(class_list)
 
-    cosine_similarity_heatmap = torch.zeros((10, 10))  # todo
     embeddings = []
     # colors = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'w', 'orange', 'purple']
     # colors = ['r', 'r', 'g', 'g', 'b', 'b', 'c', 'c', 'm', 'm']

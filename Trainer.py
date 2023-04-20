@@ -1,5 +1,9 @@
 import copy
 import math
+
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+
 from health_multimodal.text import get_cxr_bert_inference
 
 import numpy
@@ -26,37 +30,19 @@ from models import myLinearModel, myMLP
 
 # zero shot o SHARED true, IMAGE true TEXT true
 # oppure con SHARED false, IMAGE false TEXT false
-SHARED = True  # True,  False # xxx shared ha precedenza (usare sempre shared true con image e text true)
+SHARED = True  # True,  False # xxx shared ha precedenza (usare sempre shared true con image e text true,
+# xxx cazzata, shared true mette gli altri due a true <3
 # con shared false invece si può fare che ci pare
 IMAGE_MODEL = True  # True, False
 TEXT_MODEL = True  # True, False
 MODEL_USED = "mlp"  # mlp, dense, "no-head"
 
 CHANGE_LABELS = False
+from io import BytesIO
+from PIL import Image
+
 
 class Trainer:
-    @staticmethod
-    def compare_models(model_1, model_2):
-        models_differ = 0
-        for key_item_1, key_item_2 in zip(model_1.state_dict().items(), model_2.state_dict().items()):
-            if torch.equal(key_item_1[1], key_item_2[1]):
-                pass
-            else:
-                models_differ += 1
-                if (key_item_1[0] == key_item_2[0]):
-                    print('Mismtach found at', key_item_1[0])
-                else:
-                    raise Exception
-        if models_differ == 0:
-            print('Models match perfectly! :)')
-
-    @staticmethod
-    def convert_1d_to_2d(arr):
-        mask = torch.tensor(arr) == 1
-        result = torch.zeros((len(arr), 2))
-        result[mask, 1] = 1
-        result[~mask, 0] = 1
-        return result.tolist()
 
     def __init__(self, single_prompt, prompts, class_names, loss_name, lr, device, writer):
         self.bert_encoder = get_cxr_bert_inference()
@@ -121,7 +107,7 @@ class Trainer:
 
         print("image adapter", self.image_adapter)  # xxx print summary
         print("text adapter", self.text_adapter)  # xxx print summary
-        if len(params)>0:
+        if len(params) > 0:
             print("Creating Adam optimizer...")
             self.optimizer = optim.Adam(params, lr=lr)
             for param_group in self.optimizer.param_groups:
@@ -137,87 +123,16 @@ class Trainer:
         self.test_f1_heat_map = torch.empty((0, 5))
         self.test_auroc_heat_map = torch.empty((0, 5))
 
-    # todo add val metrics
-    @torch.no_grad()
-    def zero_shot_test_val(self, data_loader, basic_prompts, test="test"):
-        y_true = []
-        y_pred = []
-        with torch.no_grad():
-            for embs, labels in tqdm(data_loader, desc="Zero-shot " + test):
-                embs = embs.to(self.device)
-                labels = labels.to(self.device)
-                new_embs = embs
-                new_embs = F.normalize(new_embs, dim=-1)
-
-                predicted_labels = torch.zeros(labels.shape[0], 5).to(self.device)
-
-                i = -1
-                for label_name in self.class_names:
-                    i += 1
-                    pos_prompt = self.prompts[label_name]["positive"]
-                    neg_prompt = self.prompts[label_name]["negative"]
-
-                    pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
-                    assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-                    if not basic_prompts:
-                        pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
-                    pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
-
-                    neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
-                    assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-                    if not basic_prompts:
-                        neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
-                    neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
-
-                    pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
-                    neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
-
-                    pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
-                    neg_similarities = neg_similarities.reshape(-1, 1)
-                    predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1), dim=1)
-
-                predicted_labels_np = predicted_labels.cpu().numpy()
-
-                y_true.append(labels.cpu().numpy())
-                y_pred.append(predicted_labels_np)
-
-        # Concatenate the true and predicted labels
-        y_true = np.concatenate(y_true)
-        y_pred = np.concatenate(y_pred)
-
-        # Calculate the metrics
-        accuracy = accuracy_score(y_true, y_pred)
-        f1 = f1_score(y_true, y_pred, average="weighted")
-        auroc = roc_auc_score(y_true, y_pred, average="weighted", multi_class="ovr")
-        # precision = precision_score(y_true, y_pred, average="weighted")
-        # recall = recall_score(y_true, y_pred, average="weighted")
-
-        # Calculate precision-recall curve for each class
-        precision_curve = []
-        recall_curve = []
-        for i in range(5):
-            precision_i, recall_i, thresholds = precision_recall_curve(y_true[:, i], y_pred[:, i])
-            precision_curve.append(precision_i)
-            recall_curve.append(recall_i)
-        if self.writer is not None:
-            self.writer.add_scalar(test + "/Comparison Accuracy", accuracy, 0)
-            self.writer.add_scalar(test + "/Comparison F1 score", f1, 0)
-            self.writer.add_scalar(test + "/Comparison AUROC", auroc, 0)
-            for i in range(5):
-                self.writer.add_scalar(test + "/Comparison Class Accuracy", accuracy_score(y_true[:, i], y_pred[:, i]),
-                                       i)
-                self.writer.add_scalar(test + "/Comparison Class Precision",
-                                       precision_score(y_true[:, i], y_pred[:, i], average="weighted"), i)
-                self.writer.add_scalar(test + "/Comparison Class Recall",
-                                       recall_score(y_true[:, i], y_pred[:, i], average="weighted"), i)
-            for i in range(5):
-                fig = plt.figure()
-                plt.plot(recall_curve[i], precision_curve[i], label='Precision-Recall curve')
-                plt.xlabel('Recall')
-                plt.ylabel('Precision')
-                plt.title('Precision-Recall Curve for Class ' + str(i))
-                plt.legend(loc="lower left")
-                self.writer.add_figure(test + "/Precision-Recall Curve for Class " + str(i), fig)
+    def my_scatter_plt(self, x_axis, y_axis, metric, epoch, mode):
+        fig = plt.figure()
+        plt.scatter(x_axis, y_axis)
+        plt.xlabel('Epoch')
+        plt.ylabel(metric)
+        plt.ylim(0, 1)
+        plt.title('Class ' + metric)
+        self.writer.add_figure(mode+'/Class ' + metric, fig, epoch)
+        plt.clf()
+        plt.close()
 
     @staticmethod
     def preprocessing(chex_competition, xrays_position, single_prompt, batch_size, lr, epochs, loss_name):
@@ -278,20 +193,20 @@ class Trainer:
                     suffix += "-only-image-adapter"
                 elif TEXT_MODEL:
                     suffix += "-only-text-adapeter"
-            w_path = "./joint-training/joint-train-loss-" + str(loss_name) + "-lr-" + str(
+            w_path = "./saved-bounds/joint-train-loss-" + str(loss_name) + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
         if epochs == 0:
             if SHARED and IMAGE_MODEL and TEXT_MODEL:
-                suffix = "-SHARED-adapter-"+MODEL_USED
+                suffix = "-SHARED-adapter-" + MODEL_USED
             elif not SHARED and not IMAGE_MODEL and not TEXT_MODEL:
                 suffix = "-no-head"
             else:
                 raise Exception
             print("Attenzione! Zero-shot evaluation!")
-            w_path = "./joint-training/zero-shot-model"+ chex_str + str_basic + "-" + str(xrays_position) + suffix
-        # w_path = "./joint-training/rapid_check"
+            w_path = "./saved-bounds/zero-shot-model" + chex_str + str_basic + "-" + str(xrays_position) + suffix
+        w_path = "./joint-training/rapid_check"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -841,8 +756,11 @@ class Trainer:
         return iteration
 
     @torch.no_grad()
-    def val(self, val_loader, criterion, epoch, epochs, mode=None, tasks_order=None):
-        # xxx ONE EPOCH VAL
+    def val(self, val_loader, criterion, epoch, epochs, mode="joint", tasks_order=None):
+        '''
+        mode = "joint" or "class-pos-neg"/ "class-pos"
+        if "class" we need to set "tasks_order"
+        '''
         batch_idx = 0
         y_true = []
         y_pred = []
@@ -851,7 +769,7 @@ class Trainer:
         if TEXT_MODEL:
             self.text_adapter.eval()
         with torch.no_grad():
-            for embs, labels in tqdm(val_loader, desc="Validating on chexpert, Epoch " + str(epoch)):
+            for embs, labels in tqdm(val_loader, desc="Validating on chexpert mode: " + mode + ", Epoch " + str(epoch)):
                 if self.loss_name == "opzione2" or self.loss_name == "opzione2variant":
                     loss = 0.0
                 batch_idx += 1
@@ -928,7 +846,6 @@ class Trainer:
                         loss = 1 + loss / labels.shape[0]
                     pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                     neg_similarities = neg_similarities.reshape(-1, 1)
-                    # xxx NON E' DERIVABILE LOL Take the maximum similarity as the predicted label
                     predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1),
                                                           dim=1)
 
@@ -991,10 +908,7 @@ class Trainer:
             tmp_f1 = torch.zeros(1, 5)
             tmp_auroc = torch.zeros(1, 5)
             for i in range(5):
-                # tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i], average="weighted")
                 tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])
-                # tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_pred[:, i], average="weighted",
-                #                                                    multi_class="ovr")
                 tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_pred[:, i])
 
             self.val_f1_heat_map = torch.cat([self.val_f1_heat_map, tmp_f1], dim=0)
@@ -1007,7 +921,7 @@ class Trainer:
                     im, cbar = heatmap(self.val_f1_heat_map, [self.class_names[i] for i in tasks_order],
                                        [self.class_names[i] for i in tasks_order], ax=ax,
                                        cmap="YlGn", cbarlabel="F1 score")
-                elif mode == "joint":
+                elif mode == "joint" or mode == "zero":
                     im, cbar = heatmap(self.val_f1_heat_map, [i for i in range(1, epochs + 1)],
                                        [self.class_names[i] for i in range(0, 5)], ax=ax,
                                        cmap="YlGn", cbarlabel="F1 score")
@@ -1016,7 +930,7 @@ class Trainer:
                 # plt.show()
                 if mode == "class pos-neg":
                     self.writer.add_figure('val/class pos-neg incremental/F1 score Heatmap', fig)
-                elif mode == "joint":
+                elif mode == "joint" or mode == "zero":
                     self.writer.add_figure('val/joint train/F1 score Heatmap', fig)
 
                 self.val_auroc_heat_map = numpy.array(self.val_auroc_heat_map)
@@ -1025,7 +939,7 @@ class Trainer:
                     im, cbar = heatmap(self.val_auroc_heat_map, [self.class_names[i] for i in tasks_order],
                                        [self.class_names[i] for i in tasks_order], ax=ax,
                                        cmap="YlGn", cbarlabel="AUROC score")
-                elif mode == "joint":
+                elif mode == "joint" or mode == "zero":
                     im, cbar = heatmap(self.val_auroc_heat_map, [i for i in range(1, epochs + 1)],
                                        [self.class_names[i] for i in range(0, 5)], ax=ax,
                                        cmap="YlGn", cbarlabel="AUROC score")
@@ -1034,29 +948,42 @@ class Trainer:
                 # plt.show()
                 if mode == "class pos-neg":
                     self.writer.add_figure('val/class pos-neg incremental/AUROC score Heatmap', fig)
-                elif mode == "joint":
+                elif mode == "joint" or mode == "zero":
                     self.writer.add_figure('val/joint train/AUROC score Heatmap', fig)
 
-                for i in range(5):
-                    self.writer.add_scalar("val/Class Accuracy ep" + str(epoch),
-                                           accuracy_score(y_true[:, i], y_pred[:, i]),
-                                           i)
-                    self.writer.add_scalar("val/Class Precision ep" + str(epoch),
-                                           precision_score(y_true[:, i], y_pred[:, i]), i)
-                    self.writer.add_scalar("val/Class Recall ep" + str(epoch),
-                                           recall_score(y_true[:, i], y_pred[:, i]), i)
-        # for i in range(5):
-        #     fig = plt.figure()
-        #     plt.plot(recall_curve[i], precision_curve[i], label='Precision-Recall curve')
-        #     plt.xlabel('Recall')
-        #     plt.ylabel('Precision')
-        #     plt.title('Precision-Recall Curve for Class ' + str(i))
-        #     plt.legend(loc="lower left")
-        #     writer.add_figure('Precision-Recall Curve for Class ' + str(i), fig)
+            x = [1, 2, 3, 4, 5]
+            acc_y = []
+            prec_y = []
+            rec_y = []
+            for i in range(5):
+                acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))
+                prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))
+                rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))
+                # self.writer.add_scalar("val/Class Accuracy",
+                #                        accuracy_score(y_true[:, i], y_pred[:, i]), i)
+                # self.writer.add_scalar("val/Class Precision",
+                #                        precision_score(y_true[:, i], y_pred[:, i]), i)
+                # self.writer.add_scalar("val/Class Recall",
+                #                        recall_score(y_true[:, i], y_pred[:, i]), i)
+            self.my_scatter_plt(x_axis=x, y_axis=acc_y, metric="Accuracy", epoch=epoch, mode="val")
+            self.my_scatter_plt(x_axis=x, y_axis=prec_y, metric="Precision", epoch=epoch, mode="val")
+            self.my_scatter_plt(x_axis=x, y_axis=rec_y, metric="Recall", epoch=epoch, mode="val")
+
+            for i in range(5):
+                fig = plt.figure()
+                plt.plot(recall_curve[i], precision_curve[i], label='Precision-Recall curve')
+                plt.xlabel('Recall')
+                plt.ylabel('Precision')
+                plt.title('Precision-Recall Curve for Class ' + str(i))
+                plt.legend(loc="lower left")
+                self.writer.add_figure('val Precision-Recall Curve/Curve for Class ' + str(i), fig, epoch)
 
     @torch.no_grad()
-    def test(self, test_loader, criterion, epoch, epochs, mode=None, tasks_order=None):
-        # XXX TEST
+    def test(self, test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None):
+        '''
+        mode = "joint" or "class-pos-neg"/ "class-pos"
+        if "class" we need to set "tasks_order"
+        '''
         y_true = []
         y_pred = []
         if IMAGE_MODEL:
@@ -1064,16 +991,13 @@ class Trainer:
         if TEXT_MODEL:
             self.text_adapter.eval()
         with torch.no_grad():
-            for embs, labels in tqdm(test_loader, desc="Testing on chexpert"):
-
+            for embs, labels in tqdm(test_loader, desc="Testing on chexpert mode: " + mode):
                 # image0_to_plt = embs[0]
                 # image0_to_plt = image0_to_plt.permute(1, 2, 0)
                 # # Plot the RGB tensor
                 # plt.imshow(image0_to_plt)
                 # plt.show()
-
                 embs = embs.to(self.device)
-                # embs = torch.rand_like(embs).to(self.device)
                 labels = labels.to(self.device)
                 if IMAGE_MODEL:
                     new_embs = self.image_adapter(embs)
@@ -1083,7 +1007,6 @@ class Trainer:
 
                 predicted_labels = torch.zeros(labels.shape[0], 5).to(self.device)
 
-                # Loop through each label
                 i = -1
                 for label_name in self.class_names:
                     i += 1
@@ -1091,9 +1014,6 @@ class Trainer:
                     pos_prompt = self.prompts[label_name]["positive"]
                     neg_prompt = self.prompts[label_name]["negative"]
 
-                    # pos_prompt = pos_prompt.to(device)
-                    # neg_prompt = neg_prompt.to(device)
-                    # Encode the positive and negative prompts
                     pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
                     if TEXT_MODEL:
                         pos_prompt_embedding = pos_prompt_embedding.to(self.device)
@@ -1118,7 +1038,6 @@ class Trainer:
 
                     pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                     neg_similarities = neg_similarities.reshape(-1, 1)
-                    # xxx NON E' DERIVABILE LOL Take the maximum similarity as the predicted label
                     predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1), dim=1)
                     # predicted_labels[:, i] = pos_similarities - neg_similarities  # XXX grandissima differnza
 
@@ -1160,10 +1079,7 @@ class Trainer:
             tmp_f1 = torch.zeros(1, 5)
             tmp_auroc = torch.zeros(1, 5)
             for i in range(5):
-                # tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i], average="weighted")
                 tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])
-                # tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_pred[:, i], average="weighted",
-                #                                                    multi_class="ovr")
                 tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_pred[:, i])
 
             self.test_f1_heat_map = torch.cat([self.test_f1_heat_map, tmp_f1], dim=0)
@@ -1182,20 +1098,22 @@ class Trainer:
             if epoch == epochs:
                 self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
                 fig, ax = plt.subplots()
-                if mode == "class pos-neg":
+                if mode == "class-pos-neg" or mode == "class-pos":
                     im, cbar = heatmap(self.test_f1_heat_map, [self.class_names[i] for i in tasks_order],
                                        [self.class_names[i] for i in tasks_order], ax=ax,
                                        cmap="YlGn", cbarlabel="F1 score")
-                elif mode == "joint":
-                    im, cbar = heatmap(self.test_f1_heat_map, [i for i in range(1, epochs+1)],
+                elif mode == "joint" or mode == "zero":
+                    im, cbar = heatmap(self.test_f1_heat_map, [i for i in range(1, epochs + 1)],
                                        [self.class_names[i] for i in range(0, 5)], ax=ax,
                                        cmap="YlGn", cbarlabel="F1 score")
+
+
                 texts = annotate_heatmap(im, valfmt="{x:.2f}")
                 fig.tight_layout()
                 # plt.show()
-                if mode == "class pos-neg":
-                    self.writer.add_figure('test/class pos-neg incremental/F1 score Heatmap', fig)
-                elif mode == "joint":
+                if mode == "class-pos-neg" or mode == "class-pos":
+                    self.writer.add_figure("test/" + mode + ' incremental/F1 score Heatmap', fig)
+                elif mode == "joint" or mode == "zero":
                     self.writer.add_figure('test/joint train/F1 score Heatmap', fig)
 
                 self.test_auroc_heat_map = numpy.array(self.test_auroc_heat_map)
@@ -1204,24 +1122,36 @@ class Trainer:
                     im, cbar = heatmap(self.test_auroc_heat_map, [self.class_names[i] for i in tasks_order],
                                        [self.class_names[i] for i in tasks_order], ax=ax,
                                        cmap="YlGn", cbarlabel="AUROC score")
-                elif mode == "joint":
-                    im, cbar = heatmap(self.test_auroc_heat_map, [i for i in range(1, epochs+1)],
+                elif mode == "joint" or mode == "zero":
+                    im, cbar = heatmap(self.test_auroc_heat_map, [i for i in range(1, epochs + 1)],
                                        [self.class_names[i] for i in range(0, 5)], ax=ax,
                                        cmap="YlGn", cbarlabel="AUROC score")
                 texts = annotate_heatmap(im, valfmt="{x:.2f}")
                 fig.tight_layout()
                 # plt.show()
-                if mode == "class pos-neg":
-                    self.writer.add_figure('test/class pos-neg incremental/AUROC score Heatmap', fig)
-                elif mode == "joint":
+                if mode == "class-pos-neg" or mode == "class-pos":
+                    self.writer.add_figure("test/" + mode + ' incremental/AUROC score Heatmap', fig)
+                elif mode == "joint" or mode == "zero":
                     self.writer.add_figure('test/joint train/AUROC score Heatmap', fig)
 
-                for i in range(5):
-                    self.writer.add_scalar("test/Class Accuracy", accuracy_score(y_true[:, i], y_pred[:, i]), i)
-                    self.writer.add_scalar("test/Class Precision",
-                                           precision_score(y_true[:, i], y_pred[:, i]), i)
-                    self.writer.add_scalar("test/Class Recall",
-                                           recall_score(y_true[:, i], y_pred[:, i]), i)
+            x = [1, 2, 3, 4, 5]
+            acc_y = []
+            prec_y = []
+            rec_y = []
+            for i in range(5):
+                acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))
+                prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))
+                rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))
+                # self.writer.add_scalar("val/Class Accuracy",
+                #                        accuracy_score(y_true[:, i], y_pred[:, i]), i)
+                # self.writer.add_scalar("val/Class Precision",
+                #                        precision_score(y_true[:, i], y_pred[:, i]), i)
+                # self.writer.add_scalar("val/Class Recall",
+                #                        recall_score(y_true[:, i], y_pred[:, i]), i)
+            self.my_scatter_plt(x_axis=x, y_axis=acc_y, metric="Accuracy", epoch=epoch, mode="test")
+            self.my_scatter_plt(x_axis=x, y_axis=prec_y, metric="Precision", epoch=epoch, mode="test")
+            self.my_scatter_plt(x_axis=x, y_axis=rec_y, metric="Recall", epoch=epoch, mode="test")
+
             for i in range(5):
                 fig = plt.figure()
                 plt.plot(recall_curve[i], precision_curve[i], label='Precision-Recall curve')
@@ -1229,9 +1159,16 @@ class Trainer:
                 plt.ylabel('Precision')
                 plt.title('Precision-Recall Curve for Class ' + str(i))
                 plt.legend(loc="lower left")
-                self.writer.add_figure('test/Precision-Recall Curve for Class ' + str(i), fig)
+                self.writer.add_figure('test Precision-Recall Curve/Curve for Class ' + str(i), fig, epoch)
 
-    @staticmethod  # xxx for class-incremental
+        # if (epoch == epochs and TEXT_MODEL) or (epoch == 0 and epochs == 0):
+        #     self.plot_cosine_similarity_text_embs()
+        #     self.plot_new_text_embeddings()
+
+        self.plot_cosine_similarity_text_embs(epoch)
+        self.plot_new_text_embeddings(epoch)
+
+    @staticmethod  # xxx for class-incremental one class with intersection
     def split_dataloader_by_label(dataloader, batch_size):
         # Initialize an empty list to store the dataloaders
         dataloaders = []
@@ -1258,7 +1195,7 @@ class Trainer:
         # Return the list of dataloaders
         return dataloaders
 
-    @staticmethod  # xxx for data-incremental
+    @staticmethod  # xxx for data-incremental and class-incremental two class no intersection
     def split_dataloader_data_incremental(dataloader, n):
         """
         Splits a PyTorch DataLoader object with a ConcatDataset into N smaller DataLoader objects of equal size.
@@ -1338,6 +1275,210 @@ class Trainer:
                 for j in range(5):
                     label_counts[j] += (labels[:, j] == 1).sum().item()
             print(f"Label counts: {label_counts}")
+
+    @staticmethod
+    def compare_models(model_1, model_2):
+        models_differ = 0
+        for key_item_1, key_item_2 in zip(model_1.state_dict().items(), model_2.state_dict().items()):
+            if torch.equal(key_item_1[1], key_item_2[1]):
+                pass
+            else:
+                models_differ += 1
+                if (key_item_1[0] == key_item_2[0]):
+                    print('Mismtach found at', key_item_1[0])
+                else:
+                    raise Exception
+        if models_differ == 0:
+            print('Models match perfectly! :)')
+
+    @staticmethod
+    def convert_1d_to_2d(arr):
+        mask = torch.tensor(arr) == 1
+        result = torch.zeros((len(arr), 2))
+        result[mask, 1] = 1
+        result[~mask, 0] = 1
+        return result.tolist()
+
+    def plot_new_text_embeddings(self, epoch):
+        abbrevviations = ["ATEL-pos", "ATEL-neg", "CMG-pos", "CMG-neg", "CONS-pos", "CONS-neg",
+                          "EDE-pos", "EDE-neg", "PLEF-pos", "PLEF-neg"]
+        cosine_similarity_heatmap_text_embs = torch.zeros((10, 10))  # todo
+        embeddings = []
+        shapes = ['o', 'v', 'o', 'v', 'o', 'v', 'o', 'v', 'o', 'v']
+        class_groups = {0: 0, 1: 0, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 7: 3, 8: 4, 9: 4}
+        group_colors = ['r', 'g', 'b', 'c', 'm']
+        colors = [group_colors[class_groups[i]] for i in range(10)]
+
+        for label_name in self.class_names:
+            pos_prompt = self.prompts[label_name]["positive"]
+            neg_prompt = self.prompts[label_name]["negative"]
+
+            pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+            if TEXT_MODEL:
+                pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+            assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+            if not self.basic_prompts:
+                pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+            pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+
+            neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+            if TEXT_MODEL:
+                neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
+            assert neg_prompt_embedding.shape[0] == len(neg_prompt)
+            if not self.basic_prompts:
+                neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
+            neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+
+            embeddings.append(pos_prompt_embedding)
+            embeddings.append(neg_prompt_embedding)
+
+        embeddings = torch.stack(embeddings).cpu()
+
+        # xxx perform PCA on the embeddings to reduce them to 2 dimensions
+        pca = PCA(n_components=2)
+        reduced_embeddings = pca.fit_transform(embeddings)
+
+        # create new Figure object
+        fig = plt.figure()
+
+        # plot the reduced embeddings
+        for i in range(10):
+            plt.scatter(reduced_embeddings[i, 0], reduced_embeddings[i, 1], marker=shapes[i], c=colors[i],
+                        label=f'class{i}')
+        plt.title("PCA multiple-prompts")
+
+        # create legend
+        legend_categories = {'r': 'ATEL', 'g': 'CMG', 'b': 'CONS', 'c': 'EDE', 'm': 'PLEF'}
+        legend_shapes = {'o': 'Positive', 'v': 'Negative'}
+        handles = []
+        for color, category in legend_categories.items():
+            handles.append(
+                plt.Line2D([0], [0], marker='o', color='w', label=category, markerfacecolor=color, markersize=10))
+        for shape, label in legend_shapes.items():
+            handles.append(
+                plt.Line2D([0], [0], marker=shape, color='w', label=label, markerfacecolor='k', markersize=10))
+        plt.legend(handles=handles)
+
+        # convert plot to image and add it to SummaryWriter
+        fig.canvas.draw()  # draw the figure
+        # image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        # image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        self.writer.add_figure('visual-embeddings/PCA text-embs', fig)
+
+        # xxx perform t-SNE on the embeddings to reduce them to 2 dimensions
+        tsne = TSNE(n_components=2, metric="euclidean")
+        reduced_embeddings = tsne.fit_transform(embeddings)
+        # create new Figure object
+        fig = plt.figure()
+
+        # plot the reduced embeddings
+        for i in range(10):
+            plt.scatter(reduced_embeddings[i, 0], reduced_embeddings[i, 1], marker=shapes[i], c=colors[i],
+                        label=f'class{i}')
+        plt.title("PCA multiple-prompts")
+
+        # create legend
+        legend_categories = {'r': 'ATEL', 'g': 'CMG', 'b': 'CONS', 'c': 'EDE', 'm': 'PLEF'}
+        legend_shapes = {'o': 'Positive', 'v': 'Negative'}
+        handles = []
+        for color, category in legend_categories.items():
+            handles.append(
+                plt.Line2D([0], [0], marker='o', color='w', label=category, markerfacecolor=color, markersize=10))
+        for shape, label in legend_shapes.items():
+            handles.append(
+                plt.Line2D([0], [0], marker=shape, color='w', label=label, markerfacecolor='k', markersize=10))
+        plt.legend(handles=handles)
+
+        # convert plot to image and add it to SummaryWriter
+        fig.canvas.draw()  # draw the figure
+        # image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        # image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        self.writer.add_figure('visual-embeddings/t-SNE text-embs', fig, epoch)
+
+    def plot_cosine_similarity_text_embs(self, epoch):
+        '''
+               Atelectasis: ATEL
+               Cardiomegaly: CMG
+               Consolidation: CONS
+               Edema: EDE
+               Pleural Effusion: PLEF
+           '''
+        abbrevviations = ["ATEL-pos", "ATEL-neg", "CMG-pos", "CMG-neg", "CONS-pos", "CONS-neg",
+                          "EDE-pos", "EDE-neg", "PLEF-pos", "PLEF-neg"]
+
+        cosine_similarity_heatmap = torch.zeros((10, 10))
+
+        for i, label_name_i in enumerate(self.class_names):
+            pos_prompt = self.prompts[label_name_i]["positive"]
+            neg_prompt = self.prompts[label_name_i]["negative"]
+
+            pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+            if TEXT_MODEL:
+                pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+            assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+            if not self.basic_prompts:
+                pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+            pos_emb_i = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+
+            neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+            if TEXT_MODEL:
+                neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
+            assert neg_prompt_embedding.shape[0] == len(neg_prompt)
+            if not self.basic_prompts:
+                neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
+            neg_emb_i = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+
+            for j, label_name_j in enumerate(self.class_names):
+                # print(j, label_name_j)
+                pos_prompt = self.prompts[label_name_j]["positive"]
+                neg_prompt = self.prompts[label_name_j]["negative"]
+
+                pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                if TEXT_MODEL:
+                    pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                    pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+                if not self.basic_prompts:
+                    pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+                pos_emb_j = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+
+                neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+                if TEXT_MODEL:
+                    neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                    neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
+                assert neg_prompt_embedding.shape[0] == len(neg_prompt)
+                if not self.basic_prompts:
+                    neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
+                neg_emb_j = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+
+                pos_similarities_left = torch.matmul(pos_emb_i, pos_emb_j)
+                cosine_similarity_heatmap[i * 2, j * 2] = pos_similarities_left
+
+                pos_similarities_right = torch.matmul(pos_emb_i, neg_emb_j)
+                cosine_similarity_heatmap[i * 2, j * 2 + 1] = pos_similarities_right
+
+                neg_similarities_left = torch.matmul(neg_emb_i, pos_emb_j)
+                cosine_similarity_heatmap[i * 2 + 1, j * 2] = neg_similarities_left
+
+                neg_similarities_right = torch.matmul(neg_emb_i, neg_emb_j)
+                cosine_similarity_heatmap[i * 2 + 1, j * 2 + 1] = neg_similarities_right
+
+        if self.basic_prompts:
+            str_prompts = "-single-prompt"
+        else:
+            str_prompts = "-multiple-prompts"
+        heat_map = numpy.array(cosine_similarity_heatmap)
+        fig, ax = plt.subplots()
+        im, cbar = heatmap(heat_map, [i for i in abbrevviations], [j for j in abbrevviations],
+                           ax=ax,
+                           cmap="YlGn", cbarlabel="Cosine similarity heatmap" + str_prompts)
+        texts = annotate_heatmap(im, valfmt="{x:.2f}")
+        fig.tight_layout()
+        self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, epoch)
 
 
 def change_values(tensor):
