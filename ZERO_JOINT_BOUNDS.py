@@ -19,18 +19,24 @@ if __name__ == '__main__':
 
     batch_size = 6144  # 4096, 6144 8192, 8192 (val e test sono settati di default a 1024 per avere dei plot meno rumorosi)
     lr = 0.0001  # 0.1  # 0.0001, 1, 30
-    epochs = 0  # 10
+    epochs = 10  # 10
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
     xrays_position = "all"  # "all", "frontal", "lateral"
-    loss_name = "cosine"  # standard, opzione2, opzione2variant
+    loss_name = "cosine"  # standard, opzione2, opzione2variant cosine
     writer, class_names, train_loader, val_loader, test_loader, prompts = Trainer.preprocessing(chex_competition,
                                                                                                 xrays_position,
                                                                                                 single_prompt,
                                                                                                 batch_size, lr, epochs,
                                                                                                 loss_name)
 
-    criterion = nn.BCEWithLogitsLoss()  # nn.BCEWithLogitsLoss() nn.CrossEntropyLoss
+    if loss_name == "standard":
+        print("*** BCEWithLogitsLoss ***")
+        criterion = nn.BCEWithLogitsLoss()  # nn.BCEWithLogitsLoss() nn.CrossEntropyLoss
+    elif loss_name == "cosine":
+        print("*** COSINE EMBEDDING LOSS ***")
+        criterion = nn.CosineEmbeddingLoss(margin=-1)
+
     trainer = Trainer(single_prompt, prompts, class_names, loss_name, lr, device, writer)
 
     # XXX run

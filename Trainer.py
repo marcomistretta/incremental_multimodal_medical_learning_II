@@ -34,8 +34,8 @@ from models import myLinearModel, myMLP
 # oppure con SHARED false, IMAGE false TEXT false
 SHARED = False  # True,  False # xxx shared true mette gli altri due a true <3
 # con shared false invece si può fare che ci pare
-IMAGE_MODEL = False  # True, False
-TEXT_MODEL = False  # True, False
+IMAGE_MODEL = True  # True, False
+TEXT_MODEL = True  # True, False
 MODEL_USED = "mlp"  # mlp, dense, "no-head"
 
 CHANGE_LABELS = False
@@ -210,7 +210,7 @@ class Trainer:
                     suffix += "-only-image-adapter"
                 elif TEXT_MODEL:
                     suffix += "-only-text-adapeter"
-            w_path = "./zero-and-joint-bounds/joint-train-loss-" + str(loss_name) + "-lr-" + str(
+            w_path = "./zero-and-joint-bounds-cosine/joint-train-loss-" + str(loss_name) + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
@@ -222,9 +222,10 @@ class Trainer:
             else:
                 raise Exception
             print("Attenzione! Zero-shot evaluation!")
-            w_path = "./zero-and-joint-bounds/zero-shot-model" + chex_str + str_basic + "-" + str(xrays_position) + suffix
+            w_path = "./zero-and-joint-bounds-cosine/zero-shot-model" + chex_str + str_basic + "-" + str(
+                xrays_position) + suffix
         # w_path = "./joint-training/rapid_check"
-        w_path = w_path + "-DEBUG"
+        w_path = w_path + "-DEBUG-texts"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -255,7 +256,7 @@ class Trainer:
         else:
             raise Exception
 
-        if False: # xxx to do check
+        if False:  # xxx to do check
             for i in range(5):
                 print("Task", i, len(train_loader[i].dataset))
                 Trainer.count_positive_labels(train_loader[i])
@@ -271,8 +272,8 @@ class Trainer:
 
         cl_str = ""
         if CONTINUAL_LEARNING is not None and ratio:
-            cl_str = "-"+CONTINUAL_LEARNING+"-ratio-"+threshold
-        mode = "fine-tuning-"+mode
+            cl_str = "-" + CONTINUAL_LEARNING + "-ratio-" + threshold
+        mode = "fine-tuning-" + mode
         # todo add cose rigardo CONTINUAL LERARNING, threshold, ratio
         if basic_prompts:
             str_basic = "-single-prompt"
@@ -291,13 +292,13 @@ class Trainer:
                     suffix += "-only-image-adapter"
                 elif TEXT_MODEL:
                     suffix += "-only-text-adapeter"
-            w_path = "./only-"+mode+"/"+mode+"-loss-" + str(loss_name) + "-lr-" + str(
+            w_path = "./only-" + mode + "/" + mode + "-loss-" + str(loss_name) + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
 
         if epochs == 0:
-           raise Exception
+            raise Exception
         # w_path = "./joint-training/rapid_check"
         # w_path = w_path + "-DEBUG"
         print("writer path:", w_path)
@@ -359,8 +360,6 @@ class Trainer:
         for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert, Epoch " + str(epoch)):
             if CONTINUAL_LEARNING == "myCL":
                 self.model_copy()
-            if self.loss_name == "opzione2" or self.loss_name == "opzione2variant" or self.loss_name == "bce":
-                loss = 0.0
             self.optimizer.zero_grad()
             batch_idx += 1
             embs = embs.to(self.device)
@@ -371,11 +370,12 @@ class Trainer:
                 new_embs = embs
             new_embs = F.normalize(new_embs, dim=-1)
 
-            if not self.loss_name == "bce":
-                logits = torch.zeros(labels.shape[0], 5).to(self.device)
-            else:  # if self.loss_name == "bce":
-                logits = torch.empty(0, 2).to(self.device)
-                targets = torch.empty(0, 2).to(self.device)
+            if self.loss_name == "standard":
+                logits = torch.empty(labels.shape[0], 5).to(self.device)
+            elif self.loss_name == "cosine":
+                input_1 = torch.empty(0, 128).to(self.device)
+                input_2 = torch.empty(0, 128).to(self.device)
+                targets = torch.tensor([]).to(self.device)
 
             i = -1
             for label_name in self.class_names:
@@ -401,47 +401,26 @@ class Trainer:
                     neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
                 neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
 
-                # Calculate the similarities between the image and the positive and negative prompts
-                pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
-                neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
-
                 if self.loss_name == "standard":
+                    # Calculate the similarities between the image and the positive and negative prompts
+                    pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                    neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
                     logits[:, i] = pos_similarities - neg_similarities
-                elif self.loss_name == "bce":
-                    logits = torch.cat(
-                        [logits, torch.cat([neg_similarities.unsqueeze(-1), pos_similarities.unsqueeze(-1)], dim=1)],
-                        dim=0)
-                    mask = labels[:, i] == 1
-                    tmp_targets = torch.zeros(labels.shape[0], 2).to(self.device)
-                    tmp_targets[mask, 1] = 1
-                    tmp_targets[~mask, 0] = 1
-                    targets = torch.cat([targets, tmp_targets], dim=0)
-
-                elif self.loss_name == "opzione2":  # todo optimze
-                    for j in range(labels.shape[0]):
-                        if labels[j][i] == 0:
-                            loss += -neg_similarities[j]
-                        elif labels[j][i] == 1:
-                            loss += -pos_similarities[j]
-                    loss = 1 + loss / labels.shape[0]
-                elif self.loss_name == "opzione2variant":  # todo optimze
-                    for j in range(labels.shape[0]):
-                        if labels[j][i] == 0:
-                            loss += -neg_similarities[j] + pos_similarities[j]
-                        elif labels[j][i] == 1:
-                            loss += -pos_similarities[j] + neg_similarities[j]
-                    loss = 1 + loss / labels.shape[0]
+                elif self.loss_name == "cosine":
+                    tmp_1 = alternate_tensors(neg_prompt_embedding, pos_prompt_embedding, labels.shape[0])
+                    input_1 = torch.cat([input_1, tmp_1], dim=0)
+                    tmp_2 = duplicate_rows(new_embs)
+                    input_2 = torch.cat([input_2, tmp_2], dim=0)
+                    tmp_3 = double_length_tensor(labels[:, i])
+                    targets = torch.cat([targets, tmp_3], dim=0)
 
             if self.change_labels:
                 labels = change_values(labels)
             if self.loss_name == "standard":
                 loss = criterion(logits, labels)
-            elif self.loss_name == "bce":
-                loss = criterion(logits, targets)
-            elif self.loss_name == "opzione2":
-                pass
-            elif self.loss_name == "opzione2variant":
-                pass
+            elif self.loss_name == "cosine":
+                loss = criterion(input_1, input_2, targets)
+
             loss.backward()
             self.optimizer.step()
             iteration = (epoch - 1) * len(train_loader) + batch_idx
@@ -466,11 +445,11 @@ class Trainer:
             self.image_adapter.train()
         if TEXT_MODEL:
             self.text_adapter.train()
-        for embs, labels in tqdm(train_loader, desc="Fine-tuning on task " + str(current_task) + ", Epoch " + str(epoch)):
+        for embs, labels in tqdm(train_loader,
+                                 desc="Fine-tuning on task " + str(current_task) + ", Epoch " + str(epoch)):
             if CONTINUAL_LEARNING == "myCL":
                 self.model_copy()
-            if self.loss_name == "opzione2" or self.loss_name == "opzione2variant":
-                loss = 0.0
+
             self.optimizer.zero_grad()
             batch_idx += 1
             embs = embs.to(self.device)
@@ -518,20 +497,6 @@ class Trainer:
             if self.loss_name == "standard":
                 logits = pos_similarities - neg_similarities  # XXX grandissima differnza
 
-            elif self.loss_name == "opzione2":  # todo optimze
-                for j in range(labels.shape[0]):
-                    if labels[j] == 0:
-                        loss += -neg_similarities[j]
-                    elif labels[j] == 1:
-                        loss += -pos_similarities[j]
-                loss = 1 + loss / labels.shape[0]
-            elif self.loss_name == "opzione2variant":
-                for j in range(labels.shape[0]):
-                    if labels[j] == 0:
-                        loss += -neg_similarities[j] + pos_similarities[j]
-                    elif labels[j] == 1:
-                        loss += -pos_similarities[j] + neg_similarities[j]
-                loss = 1 + loss / labels.shape[0]
             # Compute loss and backpropagate
             # todo fare tutte le loss
             # loss figa con labels -2, 2 che ipoteticamnete spara pos a 1 neg a -1 e viceversa
@@ -541,10 +506,7 @@ class Trainer:
 
             if self.loss_name == "standard":
                 loss = criterion(logits, labels)
-            elif self.loss_name == "opzione2":
-                pass
-            elif self.loss_name == "opzione2variant":
-                pass
+
             loss.backward()
             self.optimizer.step()
 
@@ -584,11 +546,12 @@ class Trainer:
 
                 predicted_labels = torch.zeros(labels.shape[0], 5).to(self.device)
 
-                if not self.loss_name == "bce":
-                    logits = torch.zeros(labels.shape[0], 5).to(self.device)
-                else:  # if self.loss_name == "bce":
-                    logits = torch.empty(0, 2).to(self.device)
-                    targets = torch.empty(0, 2).to(self.device)
+                if self.loss_name == "standard":
+                    logits = torch.empty(labels.shape[0], 5).to(self.device)
+                elif self.loss_name == "cosine":
+                    input_1 = torch.empty(0, 128).to(self.device)
+                    input_2 = torch.empty(0, 128).to(self.device)
+                    targets = torch.tensor([]).to(self.device)
 
                 i = -1
                 for label_name in self.class_names:
@@ -618,33 +581,16 @@ class Trainer:
                     neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
 
                     if self.loss_name == "standard":
-                        logits[:, i] = pos_similarities - neg_similarities  # XXX grandissima differnza
-                    elif self.loss_name == "bce":
-                        logits = torch.cat([logits,
-                                            torch.cat([neg_similarities.unsqueeze(-1), pos_similarities.unsqueeze(-1)],
-                                                      dim=1)], dim=0)
-                        # tmp_labels = labels[:, i]
-                        # tmp_labels = Trainer.convert_1d_to_2d(tmp_labels)
-                        # tmp_labels = torch.tensor(tmp_labels).to(self.device)
-                        mask = labels[:, i] == 1
-                        tmp_targets = torch.zeros(labels.shape[0], 2).to(self.device)
-                        tmp_targets[mask, 1] = 1
-                        tmp_targets[~mask, 0] = 1
-                        targets = torch.cat([targets, tmp_targets], dim=0)
-                    elif self.loss_name == "opzione2":  # todo optimize
-                        for j in range(labels.shape[0]):
-                            if labels[j][i] == 0:
-                                loss += -neg_similarities[j]
-                            elif labels[j][i] == 1:
-                                loss += -pos_similarities[j]
-                        loss = 1 + loss / labels.shape[0]
-                    elif self.loss_name == "opzione2variant":  # todo optimize
-                        for j in range(labels.shape[0]):
-                            if labels[j][i] == 0:
-                                loss += -neg_similarities[j] + pos_similarities[j]
-                            elif labels[j][i] == 1:
-                                loss += -pos_similarities[j] + neg_similarities[j]
-                        loss = 1 + loss / labels.shape[0]
+                        # Calculate the similarities between the image and the positive and negative prompts
+                        logits[:, i] = pos_similarities - neg_similarities
+                    elif self.loss_name == "cosine":
+                        tmp_1 = alternate_tensors(neg_prompt_embedding, pos_prompt_embedding, labels.shape[0])
+                        input_1 = torch.cat([input_1, tmp_1], dim=0)
+                        tmp_2 = duplicate_rows(new_embs)
+                        input_2 = torch.cat([input_2, tmp_2], dim=0)
+                        tmp_3 = double_length_tensor(labels[:, i])
+                        targets = torch.cat([targets, tmp_3], dim=0)
+
                     pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                     neg_similarities = neg_similarities.reshape(-1, 1)
                     predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1),
@@ -658,12 +604,9 @@ class Trainer:
                 # loss = criterion(logits, labels)  # todo occhio alla differenza loss_ non loss_
                 if self.loss_name == "standard":
                     loss = criterion(logits, labels)
-                elif self.loss_name == "bce":
-                    loss = criterion(logits, targets)
-                elif self.loss_name == "opzione2":
-                    pass
-                elif self.loss_name == "opzione2variant":
-                    pass
+                elif self.loss_name == "cosine":
+                    loss = criterion(input_1, input_2, targets)
+
                 iteration = (epoch - 1) * len(val_loader) + batch_idx
                 if self.writer is not None:
                     self.writer.add_scalar('val/Loss', loss.item(), iteration)
@@ -756,7 +699,6 @@ class Trainer:
                 fig.tight_layout()
                 # plt.show()
                 self.writer.add_figure('val/class-pos-neg incremental/AUROC score Heatmap', fig)
-
 
             x = [1, 2, 3, 4, 5]
             acc_y = []
@@ -1394,15 +1336,15 @@ class Trainer:
         self.n_reset = 0
         self.n_updated = 0
 
-
 def change_values(tensor):
     """
     Takes a 2D torch tensor of float32 with 0 and 1 values and changes 1 to 2 and 0 to -2.
     Returns the modified tensor as a tensor of float32.
     """
     # Check if the input tensor is a 2D tensor
-    if len(tensor.shape) != 2:
-        raise ValueError("Input tensor must be a 2D tensor.")
+    # todo check se funziona sia per 2d che per 1d
+    # if len(tensor.shape) != 2:
+    #     raise ValueError("Input tensor must be a 2D tensor.")
 
     # Create a copy of the input tensor
     new_tensor = tensor.clone()
@@ -1414,4 +1356,55 @@ def change_values(tensor):
     # Convert the tensor to float32
     new_tensor = new_tensor.float()
 
-    return new_tensor
+    return new_tensor.to(tensor.device)
+
+
+# def concat_alternate(t1, t2):
+#     # Check if the tensors are of the same length
+#     if len(t1) != len(t2):
+#         raise ValueError("Tensors must be of the same length.")
+#
+#     # Initialize an empty list to store the concatenated tensor
+#     concatenated = []
+#
+#     # Iterate through the tensors simultaneously and concatenate the elements
+#     for i in range(len(t1)):
+#         concatenated.append(t1[i])
+#         concatenated.append(t2[i])
+#
+#     # Convert the list to a tensor and return it
+#     return torch.tensor(concatenated).to(t1.device)
+#
+#
+def double_length_tensor(tensor):
+    # Create a tensor of the same dtype and device as the input tensor
+    output_tensor = torch.empty(2 * len(tensor), dtype=tensor.dtype, device=tensor.device)
+    for i in range(len(tensor)):
+        if tensor[i] == 0:
+            output_tensor[2 * i] = 1
+            output_tensor[2 * i + 1] = -1
+        elif tensor[i] == 1:
+            output_tensor[2 * i] = -1
+            output_tensor[2 * i + 1] = 1
+        else:
+            raise Exception
+    return output_tensor
+
+def alternate_tensors(neg_emb, pos_emb, N):
+    """
+    This function takes two 1-d tensors of equal size and an integer N, and returns a 2-d torch tensor
+    with 2N rows. The rows are the two 1-d tensors alternated.
+    """
+    # Concatenate the two tensors along the 0th dimension to create a 2-d tensor with 2 rows
+    tensor_concatenated = torch.stack((neg_emb, pos_emb), dim=0)
+
+    # Repeat the tensor along the 0th dimension to create a tensor with 2N rows
+    tensor_repeated = tensor_concatenated.repeat(N, 1)
+
+    return tensor_repeated.to(neg_emb.device)
+
+
+def duplicate_rows(input_tensor):
+    # batch_size, emb_dim = input_tensor.shape
+    output_tensor = torch.repeat_interleave(input_tensor, 2, dim=0)
+    return output_tensor.to(input_tensor.device)
