@@ -1,10 +1,11 @@
 import matplotlib
 import numpy as np
+import torch
 from matplotlib import pyplot as plt
 
-
+@torch.no_grad()
 def heatmap(data, row_labels, col_labels, ax=None,
-            cbar_kw=None, cbarlabel="", **kwargs):
+            cbar_kw=None, cbarlabel="", metric="", **kwargs):
     """
     Create a heatmap from a numpy array and two lists of labels.
 
@@ -34,7 +35,13 @@ def heatmap(data, row_labels, col_labels, ax=None,
         cbar_kw = {}
 
     # Plot the heatmap
-    im = ax.imshow(data, **kwargs)
+    # im = ax.imshow(data, **kwargs) # xxx my fix to set limit
+    if metric == "COS":
+        im = ax.imshow(data, vmin=-1, vmax=1, **kwargs)
+    elif metric =="F1" or metric == "AUROC":
+        im = ax.imshow(data, vmin=0, vmax=1, **kwargs)
+    else:
+        raise Exception
 
     # Create colorbar
     cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
@@ -62,7 +69,7 @@ def heatmap(data, row_labels, col_labels, ax=None,
 
     return im, cbar
 
-
+@torch.no_grad()
 def annotate_heatmap(im, data=None, valfmt="{x:.2f}",
                      textcolors=("black", "white"),
                      threshold=None, **textkw):

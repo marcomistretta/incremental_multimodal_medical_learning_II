@@ -46,6 +46,11 @@ from PIL import Image
 class Trainer:
 
     def __init__(self, single_prompt, prompts, class_names, loss_name, lr, device, writer):
+        self.n_reset = 0
+        self.n_updated = 0
+        self.image_adapter_copy = None
+        self.image_adapter_copy = None
+
         self.bert_encoder = get_cxr_bert_inference()
         self.prompts = prompts
         self.class_names = class_names
@@ -70,6 +75,7 @@ class Trainer:
                 shared_model = myLinearModel().to(device)
             else:
                 print("*** ERROR... ***")
+                raise Exception
             global IMAGE_MODEL
             IMAGE_MODEL = True
             global TEXT_MODEL
@@ -124,6 +130,7 @@ class Trainer:
         self.test_f1_heat_map = torch.empty((0, 5))
         self.test_auroc_heat_map = torch.empty((0, 5))
 
+    @torch.no_grad()
     def my_scatter_plt(self, x_axis, y_axis, metric, epoch, mode):
         fig = plt.figure()
         plt.scatter(x_axis, y_axis)
@@ -180,12 +187,12 @@ class Trainer:
 
         return class_names, chex_str, train_loader, val_loader, test_loader
 
-
     @staticmethod
     def preprocessing(chex_competition, xrays_position, single_prompt, batch_size, lr, epochs, loss_name):
 
-        class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition, xrays_position, batch_size)
-
+        class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition,
+                                                                                              xrays_position,
+                                                                                              batch_size)
         if single_prompt:
             str_basic = "-single-prompt"
             prompts = basic_create_prompts(class_names)
@@ -203,7 +210,7 @@ class Trainer:
                     suffix += "-only-image-adapter"
                 elif TEXT_MODEL:
                     suffix += "-only-text-adapeter"
-            w_path = "./saved-bounds/joint-train-loss-" + str(loss_name) + "-lr-" + str(
+            w_path = "./zero-and-joint-bounds/joint-train-loss-" + str(loss_name) + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
@@ -215,7 +222,82 @@ class Trainer:
             else:
                 raise Exception
             print("Attenzione! Zero-shot evaluation!")
-            w_path = "./saved-bounds/zero-shot-model" + chex_str + str_basic + "-" + str(xrays_position) + suffix
+            w_path = "./zero-and-joint-bounds/zero-shot-model" + chex_str + str_basic + "-" + str(xrays_position) + suffix
+        # w_path = "./joint-training/rapid_check"
+        w_path = w_path + "-DEBUG"
+        print("writer path:", w_path)
+        writer = SummaryWriter(w_path)
+
+        return writer, class_names, train_loader, val_loader, test_loader, prompts
+
+    @staticmethod
+    def preprocessing_class_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+                                        epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
+                                        threshold=None, tasks_order=None):
+
+        if CONTINUAL_LEARNING is not None:
+            print("**** Gradient Clipping ****")
+            print("--->", CONTINUAL_LEARNING)
+        else:
+            print("**** NO Gradient Clipping ****")
+
+        class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition,
+                                                                                              xrays_position,
+                                                                                              batch_size)
+
+        if mode == "class-pos-neg":
+            train_loader = Trainer.concat_to_tensor_dataloader(train_loader)
+            train_loader = Trainer.split_dataloader_data_incremental(train_loader, 5)
+        elif mode == "class-pos":
+            train_loader = Trainer.concat_to_tensor_dataloader(train_loader)
+            train_loader = Trainer.split_dataloader_by_label(train_loader, batch_size=batch_size)
+            print()
+        else:
+            raise Exception
+
+        if False: # xxx to do check
+            for i in range(5):
+                print("Task", i, len(train_loader[i].dataset))
+                Trainer.count_positive_labels(train_loader[i])
+                print()
+
+            print("Val", i, len(val_loader.dataset))
+            Trainer.count_positive_labels(val_loader)
+            print()
+
+            print("Test", i, len(test_loader.dataset))
+            Trainer.count_positive_labels(test_loader)
+            print()
+
+        cl_str = ""
+        if CONTINUAL_LEARNING is not None and ratio:
+            cl_str = "-"+CONTINUAL_LEARNING+"-ratio-"+threshold
+        mode = "fine-tuning-"+mode
+        # todo add cose rigardo CONTINUAL LERARNING, threshold, ratio
+        if basic_prompts:
+            str_basic = "-single-prompt"
+            prompts = basic_create_prompts(class_names)
+        else:
+            str_basic = "-mean-prompt"
+            prompts = create_prompts(class_names)
+        if epochs > 0:
+            suffix = "-" + MODEL_USED
+            if SHARED:
+                suffix += "-SHARED-adapter"
+            else:
+                if IMAGE_MODEL and TEXT_MODEL:
+                    suffix += "-double-adapter"
+                elif IMAGE_MODEL:
+                    suffix += "-only-image-adapter"
+                elif TEXT_MODEL:
+                    suffix += "-only-text-adapeter"
+            w_path = "./only-"+mode+"/"+mode+"-loss-" + str(loss_name) + "-lr-" + str(
+                lr) + "-bs" + str(
+                batch_size) + "-ep" + str(
+                epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
+
+        if epochs == 0:
+           raise Exception
         # w_path = "./joint-training/rapid_check"
         # w_path = w_path + "-DEBUG"
         print("writer path:", w_path)
@@ -223,297 +305,48 @@ class Trainer:
 
         return writer, class_names, train_loader, val_loader, test_loader, prompts
 
-    @staticmethod  # xxx prep for class incremental-one-class
-    def preprocessing_class_incremental_one_class(loss_name, chex_competition, xrays_position, basic_prompts,
-                                                  batch_size, lr,
-                                                  epochs, CONTINUAL_LEARNING, threshold, ratio, tasks_order):
-        if CONTINUAL_LEARNING is not None:
-            print("**** Gradient clipping ****")
-            print("--->", CONTINUAL_LEARNING)
-
-        else:
-            print("**** NO Gradient clipping ****")
-
-        # xxx CHEX COMPETITION
-        if chex_competition:
-            print("*** CHEX COMPETITION ***")
-            chex_str = "-chex"
-            class_names = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
-        # xxx NOT CHEX competition
-        else:
-            print("*** NO chex competition ***")
-            class_names = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]
-            chex_str = ""
-
-        # xxx ALL FRONTAL and NOT
-        if xrays_position == "all":
-            print("*** ALL FRONTAL and NOT ***")
-            train_dataset = torch.load(
-                "embeddingDataset\\train\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-            val_dataset = torch.load(
-                "embeddingDataset\\val\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-            test_dataset = torch.load(
-                "embeddingDataset\\test\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-        # xxx FRONTAL
-        elif xrays_position == "frontal":
-            print("*** ONLY FRONTAL ***")
-            train_dataset = torch.load(
-                "embeddingDataset\\train\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-            val_dataset = torch.load(
-                "embeddingDataset\\val\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-            test_dataset = torch.load(
-                "embeddingDataset\\test\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-
-        train_loader = torch.utils.data.DataLoader(dataset=train_dataset, sampler=None, batch_size=batch_size,
-                                                   shuffle=True,
-                                                   num_workers=4, pin_memory=True, drop_last=False)
-        val_loader = torch.utils.data.DataLoader(dataset=val_dataset, sampler=None, batch_size=1024,
-                                                 shuffle=True,
-                                                 num_workers=4, pin_memory=True, drop_last=False)  # 64
-        test_loader = torch.utils.data.DataLoader(dataset=test_dataset, sampler=None, batch_size=1024,
-                                                  shuffle=True,
-                                                  num_workers=4, pin_memory=True, drop_last=False)
-
-        # val_loader = Trainer.split_dataloader_by_label(val_loader, batch_size=1024)
-        # data_loader = Trainer.split_dataloader_by_label(data_loader, batch_size=1024)
-        train_loader = Trainer.concat_to_tensor_dataloader(train_loader)
-        train_loader = Trainer.split_dataloader_by_label(train_loader, batch_size=batch_size)
-        # xxx to do unmute
-        # if True:  # xxx to do check
-        #     for i in range(5):
-        #         print("Train", i, len(train_loader[i].dataset))
-        #         Trainer.count_positive_labels(train_loader[i])
-        #         print()
-        # for i in range(5):
-        #     print("Val", i, len(val_loader[i].dataset))
-        #     Trainer.count_positive_labels(val_loader[i])
-        #     print()
-        # for i in range(5):
-        #     print("Test", i, len(data_loader[i].dataset))
-        #     Trainer.count_positive_labels(data_loader[i])
-        #     print()
-
-        print("TrainBS:", batch_size, "Val/Test Batch size default set to 1024")
-        if basic_prompts:
-            str_basic = "-NO-prompt"
-            prompts = basic_create_prompts(class_names)
-        else:
-            str_basic = "-mean-prompt"
-            prompts = create_prompts(class_names)
-
-        # w_path = "./continual-scenario/fine-tuning-online-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(epochs) + chex_str + str_basic
-        w_path = "./class_incremental_one_class_fix/not-adapter-should-forget-" + str(loss_name) + "-lr" + str(
-            lr) + "-bs" + str(
-            batch_size) + "-ep" + str(
-            epochs) + chex_str + str_basic + "-" + str(tasks_order)
-        ratio_string = ""
-        if ratio:
-            ratio_string = "-ratio"
-        if CONTINUAL_LEARNING == "profCL":
-            w_path = "./class_incremental_one_class_fix/adapter-epoch-level-tr" + str(
-                threshold) + ratio_string + "-" + str(loss_name) + "-lr" + str(
-                lr) + "-bs" + str(batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic + "-" + str(tasks_order)
-        if CONTINUAL_LEARNING == "myCL":
-            w_path = "./class_incremental_one_class_fix/adapter-batch-level-tr" + str(
-                threshold) + ratio_string + "-" + str(loss_name) + "-lr" + str(
-                lr) + "-bs" + str(
-                batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic + "-" + str(tasks_order)
-        print("summary path", w_path)
-        writer = SummaryWriter(w_path)
-
-        return writer, class_names, train_loader, val_loader, test_loader, prompts
-
-    # todo
-    @staticmethod  # xxx prep for class incremental-two-class
-    def preprocessing_class_incremental_two_class(chex_competition, xrays_position, basic_prompts, batch_size, lr,
-                                                  epochs, loss_name, CONTINUAL_LEARNING=None, ratio=None,
-                                                  threshold=None, tasks_order=None):
-
-        if CONTINUAL_LEARNING is not None:
-            print("**** Gradient Clipping ****")
-            print("--->", CONTINUAL_LEARNING)
-
-        else:
-            print("**** NO Gradient Clipping ****")
-
-        # xxx CHEX COMPETITION
-        if chex_competition:
-            print("*** CHEX COMPETITION ***")
-            chex_str = "-chex"
-            class_names = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
-        # xxx NOT CHEX competition
-        else:
-            print("*** NO chex competition ***")
-            class_names = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]
-            chex_str = ""
-
-        # xxx ALL FRONTAL and NOT
-        if xrays_position == "all":
-            print("*** ALL FRONTAL and NOT ***")
-            train_dataset = torch.load(
-                "embeddingDataset\\train\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-            val_dataset = torch.load(
-                "embeddingDataset\\val\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-            test_dataset = torch.load(
-                "embeddingDataset\\test\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-        # xxx FRONTAL
-        elif xrays_position == "frontal":
-            print("*** ONLY FRONTAL ***")
-            train_dataset = torch.load(
-                "embeddingDataset\\train\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-            val_dataset = torch.load(
-                "embeddingDataset\\val\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-            test_dataset = torch.load(
-                "embeddingDataset\\test\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-
-        train_loader = torch.utils.data.DataLoader(dataset=train_dataset, sampler=None, batch_size=batch_size,
-                                                   shuffle=True,
-                                                   num_workers=4, pin_memory=True, drop_last=False)
-        val_loader = torch.utils.data.DataLoader(dataset=val_dataset, sampler=None, batch_size=1024,
-                                                 shuffle=True,
-                                                 num_workers=4, pin_memory=True, drop_last=False)  # 64
-        test_loader = torch.utils.data.DataLoader(dataset=test_dataset, sampler=None, batch_size=1024,
-                                                  shuffle=True,
-                                                  num_workers=4, pin_memory=True, drop_last=False)
-
-        # val_loader = Trainer.split_dataloader_by_label(val_loader, batch_size=1024)
-        # data_loader = Trainer.split_dataloader_by_label(data_loader, batch_size=1024)
-        train_loader = Trainer.concat_to_tensor_dataloader(train_loader)
-        train_loader = Trainer.split_dataloader_data_incremental(train_loader, 5)
-
-        # train_loader = Trainer.split_dataloader_by_label(train_loader, batch_size=batch_size)
-        # if True:  # xxx to do check
-        #     for i in range(5):
-        #         print("Train", i, len(train_loader[i].dataset))
-        #         Trainer.count_positive_labels(train_loader[i])
-        #         print()
-        # for i in range(5):
-        #     print("Val", i, len(val_loader[i].dataset))
-        #     Trainer.count_positive_labels(val_loader[i])
-        #     print()
-        # for i in range(5):
-        #     print("Test", i, len(data_loader[i].dataset))
-        #     Trainer.count_positive_labels(data_loader[i])
-        #     print()
-
-        print("TrainBS:", batch_size, "Val/Test Batch size default set to 1024")
-        if basic_prompts:
-            str_basic = "-NO-prompt"
-            prompts = basic_create_prompts(class_names)
-        else:
-            str_basic = "-mean-prompt"
-            prompts = create_prompts(class_names)
-
-        # w_path = "./continual-scenario/fine-tuning-online-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(epochs) + chex_str + str_basic
-        w_path = "./class_incremental_two_class_F1_tables/mlp-fine-tuning-should-forget-" + str(
-            loss_name) + "-lr" + str(
-            lr) + "-bs" + str(
-            batch_size) + "-ep" + str(
-            epochs) + chex_str + str_basic + "-" + str(tasks_order)
-        ratio_string = ""
-        if ratio:
-            ratio_string = "-ratio"
-        if CONTINUAL_LEARNING == "profCL":
-            w_path = "./class_incremental_two_class_F1_tables/adapter-epoch-level-tr" + str(
-                threshold) + ratio_string + "-" + str(loss_name) + "-lr" + str(
-                lr) + "-bs" + str(batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic + "-" + str(tasks_order)
-        if CONTINUAL_LEARNING == "myCL":
-            w_path = "./class_incremental_two_class_F1_tables/adapter-batch-level-tr" + str(
-                threshold) + ratio_string + "-" + str(loss_name) + "-lr" + str(
-                lr) + "-bs" + str(
-                batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic + "-" + str(tasks_order)
-        # w_path= "./class_incremental_two_class_F1_tables/debug"
-        print("summary path", w_path)
-        writer = SummaryWriter(w_path)
-
-        return writer, class_names, train_loader, val_loader, test_loader, prompts
-
-    @staticmethod  # xxx prep for data-incremental
-    def preprocessing_data_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
-                                       epochs, CONTINUAL_LEARNING, threshold, ratio):
-
-        if CONTINUAL_LEARNING is not None:
-            print("**** Gradient Clipping ****")
-            print("--->", CONTINUAL_LEARNING)
-
-        else:
-            print("**** NO Gradient Clipping ****")
-
-        # xxx CHEX COMPETITION
-        if chex_competition:
-            print("*** CHEX COMPETITION ***")
-            chex_str = "-chex"
-            class_names = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
-        # xxx NOT CHEX competition
-        else:
-            print("*** NO chex competition ***")
-            class_names = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]
-            chex_str = ""
-
-        # xxx ALL FRONTAL and NOT
-        if xrays_position == "all":
-            print("*** ALL FRONTAL and NOT ***")
-            train_dataset = torch.load(
-                "embeddingDataset\\train\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-            val_dataset = torch.load(
-                "embeddingDataset\\val\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-            test_dataset = torch.load(
-                "embeddingDataset\\test\\512" + chex_str + "-not-normalize\\embeddings_dataset_final_old.pt")
-        # xxx FRONTAL
-        elif xrays_position == "frontal":
-            print("*** ONLY FRONTAL ***")
-            train_dataset = torch.load(
-                "embeddingDataset\\train\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-            val_dataset = torch.load(
-                "embeddingDataset\\val\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-            test_dataset = torch.load(
-                "embeddingDataset\\test\\512" + chex_str + "-not-normalize-frontal\\embeddings_dataset_final_old.pt")
-
-        train_loader = torch.utils.data.DataLoader(dataset=train_dataset, sampler=None, batch_size=batch_size,
-                                                   shuffle=True,
-                                                   num_workers=4, pin_memory=True, drop_last=False)
-        val_loader = torch.utils.data.DataLoader(dataset=val_dataset, sampler=None, batch_size=1024,
-                                                 shuffle=True,
-                                                 num_workers=4, pin_memory=True, drop_last=False)  # 64
-        test_loader = torch.utils.data.DataLoader(dataset=test_dataset, sampler=None, batch_size=1024,
-                                                  shuffle=True,
-                                                  num_workers=4, pin_memory=True, drop_last=False)
-
-        train_loader = Trainer.split_dataloader_data_incremental(train_loader, epochs)
-
-        # Trainer.print_dataloader_stats(train_loader) xxx to do unmute
-
-        print("TrainBS:", batch_size, "Val/Test Batch size default set to 1024")
-        if basic_prompts:
-            str_basic = "-NO-prompt"
-            prompts = basic_create_prompts(class_names)
-        else:
-            str_basic = "-mean-prompt"
-            prompts = create_prompts(class_names)
-
-        # w_path = "./continual-scenario/fine-tuning-online-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(epochs) + chex_str + str_basic
-        w_path = "./data_incremental/not-adapter-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(
-            epochs) + chex_str + str_basic
-        ratio_string = ""
-        if ratio:
-            ratio_string = "-ratio"
-        if CONTINUAL_LEARNING == "profCL":
-            w_path = "./data_incremental/adapter-epoch-level-tr" + str(threshold) + ratio_string + "-lr" + str(
-                lr) + "-bs" + str(batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic
-        if CONTINUAL_LEARNING == "myCL":
-            w_path = "./data_incremental/adapter-batch-level-tr" + str(threshold) + ratio_string + "-lr" + str(
-                lr) + "-bs" + str(
-                batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic
-        print("writer path:", w_path)
-        writer = SummaryWriter(w_path)
-
-        return writer, class_names, train_loader, val_loader, test_loader, prompts
+    # @staticmethod  # xxx prep for data-incremental
+    # def preprocessing_data_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+    #                                    epochs, CONTINUAL_LEARNING, threshold, ratio):
+    #
+    #     if CONTINUAL_LEARNING is not None:
+    #         print("**** Gradient Clipping ****")
+    #         print("--->", CONTINUAL_LEARNING)
+    #
+    #     else:
+    #         print("**** NO Gradient Clipping ****")
+    #
+    #     train_loader = Trainer.split_dataloader_data_incremental(train_loader, epochs)
+    #
+    #     # Trainer.print_dataloader_stats(train_loader) xxx to do unmute
+    #
+    #     print("TrainBS:", batch_size, "Val/Test Batch size default set to 1024")
+    #     if basic_prompts:
+    #         str_basic = "-NO-prompt"
+    #         prompts = basic_create_prompts(class_names)
+    #     else:
+    #         str_basic = "-mean-prompt"
+    #         prompts = create_prompts(class_names)
+    #
+    #     # w_path = "./continual-scenario/fine-tuning-online-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(epochs) + chex_str + str_basic
+    #     w_path = "./data_incremental/not-adapter-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(
+    #         epochs) + chex_str + str_basic
+    #     ratio_string = ""
+    #     if ratio:
+    #         ratio_string = "-ratio"
+    #     if CONTINUAL_LEARNING == "profCL":
+    #         w_path = "./data_incremental/adapter-epoch-level-tr" + str(threshold) + ratio_string + "-lr" + str(
+    #             lr) + "-bs" + str(batch_size) + "-ep" + str(
+    #             epochs) + chex_str + str_basic
+    #     if CONTINUAL_LEARNING == "myCL":
+    #         w_path = "./data_incremental/adapter-batch-level-tr" + str(threshold) + ratio_string + "-lr" + str(
+    #             lr) + "-bs" + str(
+    #             batch_size) + "-ep" + str(
+    #             epochs) + chex_str + str_basic
+    #     print("writer path:", w_path)
+    #     writer = SummaryWriter(w_path)
+    #
+    #     return writer, class_names, train_loader, val_loader, test_loader, prompts
 
     # xxx works for normal and for data-incremental
     def train(self, train_loader, criterion, epoch, CONTINUAL_LEARNING=None, threshold=None,
@@ -525,11 +358,7 @@ class Trainer:
             self.text_adapter.train()
         for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert, Epoch " + str(epoch)):
             if CONTINUAL_LEARNING == "myCL":
-                # make a copy of the original image_adapter before starting the training loop
-                model_copy = copy.deepcopy(self.image_adapter)
-                # define the threshold for parameter updates
-                n_reset = 0
-                n_updated = 0
+                self.model_copy()
             if self.loss_name == "opzione2" or self.loss_name == "opzione2variant" or self.loss_name == "bce":
                 loss = 0.0
             self.optimizer.zero_grad()
@@ -618,29 +447,7 @@ class Trainer:
             iteration = (epoch - 1) * len(train_loader) + batch_idx
 
             if CONTINUAL_LEARNING == "myCL":
-                for (name1, param1), (name2, param2) in zip(self.image_adapter.named_parameters(),
-                                                            model_copy.named_parameters()):
-                    # compare the values of the individual weights
-                    diff = torch.abs(param1 - param2)
-                    minimum = diff.min()
-                    maximum = diff.max()
-                    # compute the threshold value
-                    to_reset = minimum + threshold * (maximum - minimum)
-                    mask = diff < to_reset
-
-                    n_reset += torch.sum(torch.eq(mask, True))
-                    n_updated += torch.sum(torch.eq(mask, False))
-                    # reset the updated weights to the old values
-                    param1.data[mask] = param2.data[mask]
-                print()
-
-                print("number of resets:", n_reset.item(), "number of updates:", n_updated.item(), "percentage resets",
-                      n_reset.item() / (n_reset.item() + n_updated.item()))
-                self.writer.add_scalar("train/monitor-resets/resets", n_reset.item(), iteration)
-                self.writer.add_scalar("train/monitor-resets/updates", n_updated.item(), iteration)
-                self.writer.add_scalar("train/monitor-resets/percentage resets",
-                                       n_reset.item() / (n_reset.item() + n_updated.item()),
-                                       iteration)
+                self.myIncremental(epoch, threshold, iteration)
 
             if self.writer is not None:
                 self.writer.add_scalar('train/Loss', loss.item(), iteration)
@@ -650,27 +457,29 @@ class Trainer:
                 self.writer.add_scalar('train/LR', current_lr, iteration)
 
     # xxx works for class-incremental one class and both class
-    def train_class_incremental(self, train_loader, optimizer, criterion, epoch, basic_prompts, current_task,
-                                CONTINUAL_LEARNING=None, threshold=None, last_batch=0):
+    def train_class_incremental(self, train_loader, criterion, epoch, CONTINUAL_LEARNING=None, threshold=None,
+                                current_task=None,
+                                last_batch=0):
         # xxx ONE EPOCH TRAIN
         batch_idx = last_batch
-        self.image_adapter.train()
-        for embs, labels in tqdm(train_loader,
-                                 desc="Fine-tuning on task " + str(current_task) + ", Epoch " + str(epoch)):
+        if IMAGE_MODEL:
+            self.image_adapter.train()
+        if TEXT_MODEL:
+            self.text_adapter.train()
+        for embs, labels in tqdm(train_loader, desc="Fine-tuning on task " + str(current_task) + ", Epoch " + str(epoch)):
             if CONTINUAL_LEARNING == "myCL":
-                # make a copy of the original image_adapter before starting the training loop
-                model_copy = copy.deepcopy(self.image_adapter)
-                # define the threshold for parameter updates
-                n_reset = 0
-                n_updated = 0
+                self.model_copy()
             if self.loss_name == "opzione2" or self.loss_name == "opzione2variant":
                 loss = 0.0
-            optimizer.zero_grad()
+            self.optimizer.zero_grad()
             batch_idx += 1
             embs = embs.to(self.device)
             labels = labels.to(self.device)
             labels = labels[:, current_task]
-            new_embs = self.image_adapter(embs)
+            if IMAGE_MODEL:
+                new_embs = self.image_adapter(embs)
+            else:
+                new_embs = embs
             new_embs = F.normalize(new_embs, dim=-1)
 
             logits = torch.zeros(labels.shape[0]).to(self.device)
@@ -681,14 +490,20 @@ class Trainer:
             neg_prompt = self.prompts[label_name]["negative"]
 
             pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+            if TEXT_MODEL:
+                pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
             assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-            if not basic_prompts:
+            if not self.basic_prompts:
                 pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
             pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
 
             neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+            if TEXT_MODEL:
+                neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
             assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-            if not basic_prompts:
+            if not self.basic_prompts:
                 neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
             neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
 
@@ -731,40 +546,14 @@ class Trainer:
             elif self.loss_name == "opzione2variant":
                 pass
             loss.backward()
-            optimizer.step()
+            self.optimizer.step()
 
             iteration = batch_idx
             if CONTINUAL_LEARNING == "myCL":
-                for (name1, param1), (name2, param2) in zip(self.image_adapter.named_parameters(),
-                                                            model_copy.named_parameters()):
-                    # compare the values of the individual weights
-                    diff = torch.abs(param1 - param2)
-                    minimum = diff.min()
-                    maximum = diff.max()
-                    # compute the threshold value
-                    to_reset = minimum + threshold * (maximum - minimum)
-                    mask = diff < to_reset
+                self.myIncremental(threshold, iteration)
 
-                    n_reset += torch.sum(torch.eq(mask, True))
-                    n_updated += torch.sum(torch.eq(mask, False))
-                    # reset the updated weights to the old values
-                    param1.data[mask] = param2.data[mask]
-                print()
-                # iteration = (epoch - 1) * len(train_loader) + batch_idx
-
-                print("number of resets:", n_reset.item(), "number of updates:", n_updated.item(), "percentage resets",
-                      n_reset.item() / (n_reset.item() + n_updated.item()))
-                self.writer.add_scalar("monitor-resets/resets", n_reset.item(), iteration)
-                self.writer.add_scalar("monitor-resets/updates", n_updated.item(), iteration)
-                self.writer.add_scalar("monitor-resets/percentage resets",
-                                       n_reset.item() / (n_reset.item() + n_updated.item()),
-                                       iteration)
             if self.writer is not None:
-                self.writer.add_scalar('Train/Loss', loss.item(), iteration)
-            # if scheduler is not None:
-            #     scheduler.step()
-            #     current_lr = optimizer.param_groups[0]['lr']
-            #     self.writer.add_scalar('LR', current_lr, iteration)
+                self.writer.add_scalar('train/Loss', loss.item(), iteration)
         return iteration
 
     @torch.no_grad()
@@ -926,42 +715,48 @@ class Trainer:
             self.val_f1_heat_map = torch.cat([self.val_f1_heat_map, tmp_f1], dim=0)
             self.val_auroc_heat_map = torch.cat([self.val_auroc_heat_map, tmp_auroc], dim=0)
 
-            if epoch == epochs:
+            if epoch == epochs and (mode == "joint" or mode == "zero"):
                 self.val_f1_heat_map = numpy.array(self.val_f1_heat_map)
                 fig, ax = plt.subplots()
-                if mode == "class pos-neg":
-                    im, cbar = heatmap(self.val_f1_heat_map, [self.class_names[i] for i in tasks_order],
-                                       [self.class_names[i] for i in tasks_order], ax=ax,
-                                       cmap="YlGn", cbarlabel="F1 score")
-                elif mode == "joint" or mode == "zero":
-                    im, cbar = heatmap(self.val_f1_heat_map, [i for i in range(1, epochs + 1)],
-                                       [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                       cmap="YlGn", cbarlabel="F1 score")
+                im, cbar = heatmap(self.val_f1_heat_map, [i for i in range(1, epochs + 1)],
+                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
+                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
                 texts = annotate_heatmap(im, valfmt="{x:.2f}")
                 fig.tight_layout()
                 # plt.show()
-                if mode == "class pos-neg":
-                    self.writer.add_figure('val/class pos-neg incremental/F1 score Heatmap', fig)
-                elif mode == "joint" or mode == "zero":
-                    self.writer.add_figure('val/joint train/F1 score Heatmap', fig)
+                self.writer.add_figure('val/joint train/F1 score Heatmap', fig)
 
                 self.val_auroc_heat_map = numpy.array(self.val_auroc_heat_map)
                 fig, ax = plt.subplots()
-                if mode == "class pos-neg":
-                    im, cbar = heatmap(self.val_auroc_heat_map, [self.class_names[i] for i in tasks_order],
-                                       [self.class_names[i] for i in tasks_order], ax=ax,
-                                       cmap="YlGn", cbarlabel="AUROC score")
-                elif mode == "joint" or mode == "zero":
-                    im, cbar = heatmap(self.val_auroc_heat_map, [i for i in range(1, epochs + 1)],
-                                       [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                       cmap="YlGn", cbarlabel="AUROC score")
+                im, cbar = heatmap(self.val_auroc_heat_map, [i for i in range(1, epochs + 1)],
+                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
+                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
                 texts = annotate_heatmap(im, valfmt="{x:.2f}")
                 fig.tight_layout()
                 # plt.show()
-                if mode == "class pos-neg":
-                    self.writer.add_figure('val/class pos-neg incremental/AUROC score Heatmap', fig)
-                elif mode == "joint" or mode == "zero":
-                    self.writer.add_figure('val/joint train/AUROC score Heatmap', fig)
+                self.writer.add_figure('val/joint train/AUROC score Heatmap', fig)
+
+            if epoch == 4 and (mode == "class-pos-neg" or mode == "class-pos"):
+                self.val_f1_heat_map = numpy.array(self.val_f1_heat_map)
+                fig, ax = plt.subplots()
+                im, cbar = heatmap(self.val_f1_heat_map, [self.class_names[i] for i in tasks_order],
+                                   [self.class_names[i] for i in tasks_order], ax=ax,
+                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
+                texts = annotate_heatmap(im, valfmt="{x:.2f}")
+                fig.tight_layout()
+                # plt.show()
+                self.writer.add_figure('val/class-pos-neg incremental/F1 score Heatmap', fig)
+
+                self.val_auroc_heat_map = numpy.array(self.val_auroc_heat_map)
+                fig, ax = plt.subplots()
+                im, cbar = heatmap(self.val_auroc_heat_map, [self.class_names[i] for i in tasks_order],
+                                   [self.class_names[i] for i in tasks_order], ax=ax,
+                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
+                texts = annotate_heatmap(im, valfmt="{x:.2f}")
+                fig.tight_layout()
+                # plt.show()
+                self.writer.add_figure('val/class-pos-neg incremental/AUROC score Heatmap', fig)
+
 
             x = [1, 2, 3, 4, 5]
             acc_y = []
@@ -971,12 +766,6 @@ class Trainer:
                 acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))
                 prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))
                 rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))
-                # self.writer.add_scalar("val/Class Accuracy",
-                #                        accuracy_score(y_true[:, i], y_pred[:, i]), i)
-                # self.writer.add_scalar("val/Class Precision",
-                #                        precision_score(y_true[:, i], y_pred[:, i]), i)
-                # self.writer.add_scalar("val/Class Recall",
-                #                        recall_score(y_true[:, i], y_pred[:, i]), i)
             self.my_scatter_plt(x_axis=x, y_axis=acc_y, metric="Accuracy", epoch=epoch, mode="val")
             self.my_scatter_plt(x_axis=x, y_axis=prec_y, metric="Precision", epoch=epoch, mode="val")
             self.my_scatter_plt(x_axis=x, y_axis=rec_y, metric="Recall", epoch=epoch, mode="val")
@@ -1096,54 +885,48 @@ class Trainer:
 
             self.test_f1_heat_map = torch.cat([self.test_f1_heat_map, tmp_f1], dim=0)
             self.test_auroc_heat_map = torch.cat([self.test_auroc_heat_map, tmp_auroc], dim=0)
-            # if mode == "class":
-            #     for i in range(5):
-            #         self.writer.add_scalar(
-            #             "test/Class Accuracy/after task-" + str(epoch) + "-tt-" + str(tasks_order),
-            #             accuracy_score(y_true[:, i], y_pred[:, i]), i)
-            #         self.writer.add_scalar(
-            #             "test/Class Precision/after task-" + str(epoch) + "-tt-" + str(tasks_order),
-            #             precision_score(y_true[:, i], y_pred[:, i], average="weighted"), i)
-            #         self.writer.add_scalar(
-            #             "test/Class Recall/after task-" + str(epoch) + "-tt-" + str(tasks_order),
-            #             recall_score(y_true[:, i], y_pred[:, i], average="weighted"), i)
-            if epoch == epochs:
+
+            if epoch == 4 and (mode == "class-pos-neg" or mode == "class-pos"):
                 self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
                 fig, ax = plt.subplots()
-                if mode == "class-pos-neg" or mode == "class-pos":
-                    im, cbar = heatmap(self.test_f1_heat_map, [self.class_names[i] for i in tasks_order],
-                                       [self.class_names[i] for i in tasks_order], ax=ax,
-                                       cmap="YlGn", cbarlabel="F1 score")
-                elif mode == "joint" or mode == "zero":
-                    im, cbar = heatmap(self.test_f1_heat_map, [i for i in range(1, epochs + 1)],
-                                       [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                       cmap="YlGn", cbarlabel="F1 score")
-
+                im, cbar = heatmap(self.test_f1_heat_map, [self.class_names[i] for i in tasks_order],
+                                   [self.class_names[i] for i in tasks_order], ax=ax,
+                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
                 texts = annotate_heatmap(im, valfmt="{x:.2f}")
                 fig.tight_layout()
                 # plt.show()
-                if mode == "class-pos-neg" or mode == "class-pos":
-                    self.writer.add_figure("test/" + mode + ' incremental/F1 score Heatmap', fig)
-                elif mode == "joint" or mode == "zero":
-                    self.writer.add_figure('test/joint train/F1 score Heatmap', fig)
+                self.writer.add_figure("test/" + mode + ' incremental/F1 score Heatmap', fig)
 
                 self.test_auroc_heat_map = numpy.array(self.test_auroc_heat_map)
                 fig, ax = plt.subplots()
-                if mode == "class pos-neg":
-                    im, cbar = heatmap(self.test_auroc_heat_map, [self.class_names[i] for i in tasks_order],
-                                       [self.class_names[i] for i in tasks_order], ax=ax,
-                                       cmap="YlGn", cbarlabel="AUROC score")
-                elif mode == "joint" or mode == "zero":
-                    im, cbar = heatmap(self.test_auroc_heat_map, [i for i in range(1, epochs + 1)],
-                                       [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                       cmap="YlGn", cbarlabel="AUROC score")
+                im, cbar = heatmap(self.test_auroc_heat_map, [self.class_names[i] for i in tasks_order],
+                                   [self.class_names[i] for i in tasks_order], ax=ax,
+                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
                 texts = annotate_heatmap(im, valfmt="{x:.2f}")
                 fig.tight_layout()
                 # plt.show()
-                if mode == "class-pos-neg" or mode == "class-pos":
-                    self.writer.add_figure("test/" + mode + ' incremental/AUROC score Heatmap', fig)
-                elif mode == "joint" or mode == "zero":
-                    self.writer.add_figure('test/joint train/AUROC score Heatmap', fig)
+                self.writer.add_figure("test/" + mode + ' incremental/AUROC score Heatmap', fig)
+
+            if epoch == epochs and (mode == "joint" or mode == "zero"):
+                self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
+                fig, ax = plt.subplots()
+                im, cbar = heatmap(self.test_f1_heat_map, [i for i in range(1, epochs + 1)],
+                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
+                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
+                texts = annotate_heatmap(im, valfmt="{x:.2f}")
+                fig.tight_layout()
+                # plt.show()
+                self.writer.add_figure('test/joint train/F1 score Heatmap', fig)
+
+                self.test_auroc_heat_map = numpy.array(self.test_auroc_heat_map)
+                fig, ax = plt.subplots()
+                im, cbar = heatmap(self.test_auroc_heat_map, [i for i in range(1, epochs + 1)],
+                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
+                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
+                texts = annotate_heatmap(im, valfmt="{x:.2f}")
+                fig.tight_layout()
+                # plt.show()
+                self.writer.add_figure('test/joint train/AUROC score Heatmap', fig)
 
             x = [1, 2, 3, 4, 5]
             acc_y = []
@@ -1177,7 +960,7 @@ class Trainer:
         #     self.plot_new_text_embeddings()
 
         self.plot_cosine_similarity_text_embs(epoch, epochs)
-        self.plot_new_text_embeddings(epoch)
+        self.plot_new_text_embeddings(epoch, epochs)
 
     @staticmethod  # xxx for class-incremental one class with intersection
     def split_dataloader_by_label(dataloader, batch_size):
@@ -1210,15 +993,6 @@ class Trainer:
     def split_dataloader_data_incremental(dataloader, n):
         """
         Splits a PyTorch DataLoader object with a ConcatDataset into N smaller DataLoader objects of equal size.
-
-        Args:
-            dataloader (DataLoader): The PyTorch DataLoader object to split.
-            n (int): The number of smaller DataLoader objects to split into.
-            sampler (Sampler, optional): The sampler to use for each of the smaller DataLoader objects. Defaults to None,
-                which will result in using the same sampler as the original DataLoader object.
-
-        Returns:
-            A list of N PyTorch DataLoader objects of equal size.
         """
         dataset = dataloader.dataset
         num_samples = len(dataset)
@@ -1226,8 +1000,8 @@ class Trainer:
         subsets = [Subset(dataset, range(i * subset_size, min((i + 1) * subset_size, num_samples))) for i in range(n)]
 
         dataloaders = [
-            DataLoader(subset, batch_size=dataloader.batch_size, sampler=RandomSampler(subset), num_workers=4,
-                       pin_memory=True, drop_last=False) for subset in subsets]
+            DataLoader(subset, batch_size=dataloader.batch_size, sampler=RandomSampler(subset), num_workers=1,
+                       pin_memory=True, drop_last=False, persistent_workers=True) for subset in subsets]
         return dataloaders
 
     @staticmethod  # for class-incremental info
@@ -1273,10 +1047,7 @@ class Trainer:
     @staticmethod  # data-incremental info sulla distribuzione labels
     def print_dataloader_stats(dataloaders):
         """
-        Prints statistics for each DataLoader in a list of PyTorch DataLoader objects.
-
-        Args:
-            dataloaders (list): A list of PyTorch DataLoader objects to print statistics for.
+        Prints statistics for each DataLoader in a list of PyTorch DataLoader objects
         """
         for i, dataloader in enumerate(dataloaders):
             print(f"Dataloader {i}:")
@@ -1310,7 +1081,8 @@ class Trainer:
         result[~mask, 0] = 1
         return result.tolist()
 
-    def plot_new_text_embeddings(self, epoch):
+    @torch.no_grad()
+    def plot_new_text_embeddings(self, epoch, epochs):
         abbrevviations = ["ATEL-pos", "ATEL-neg", "CMG-pos", "CMG-neg", "CONS-pos", "CONS-neg",
                           "EDE-pos", "EDE-neg", "PLEF-pos", "PLEF-neg"]
         embeddings = []
@@ -1375,9 +1147,18 @@ class Trainer:
 
         # convert plot to image and add it to SummaryWriter
         fig.canvas.draw()  # draw the figure
-        # image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        # image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        self.writer.add_figure('visual-embeddings/PCA text-embs', fig, epoch)
+        # self.writer.add_figure('visual-embeddings/PCA text-embs', fig, epoch)
+        if epochs > 0 and epoch == 1:
+            img_path = 'pca_multiple_prompts.png'
+            # load the PNG image
+            image = read_image(img_path)
+            # convert the image to a grid
+            self.writer.add_image('visual-embeddings/PCA text-embs', image, 0)
+
+        if epoch == 0 and epochs == 0:
+            self.writer.add_figure('visual-embeddings/PCA text-embs', fig, 0)
+        if epochs > 0:
+            self.writer.add_figure('visual-embeddings/PCA text-embs', fig, epoch)
 
         # xxx perform t-SNE on the embeddings to reduce them to 2 dimensions
         with warnings.catch_warnings():
@@ -1409,18 +1190,29 @@ class Trainer:
 
         # convert plot to image and add it to SummaryWriter
         fig.canvas.draw()  # draw the figure
-        # image = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        # image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        self.writer.add_figure('visual-embeddings/t-SNE text-embs', fig, epoch)
 
+        # self.writer.add_figure('visual-embeddings/t-SNE text-embs', fig, epoch)
+        if epochs > 0 and epoch == 1:
+            img_path = 'tsne_multiple_prompts.png'
+            # load the PNG image
+            image = read_image(img_path)
+            # convert the image to a grid
+            self.writer.add_image('visual-embeddings/t-SNE text-embs', image, 0)
+
+        if epoch == 0 and epochs == 0:
+            self.writer.add_figure('visual-embeddings/t-SNE text-embs', fig, 0)
+        if epochs > 0:
+            self.writer.add_figure('visual-embeddings/t-SNE text-embs', fig, epoch)
+
+    @torch.no_grad()
     def plot_cosine_similarity_text_embs(self, epoch, epochs):
         '''
-               Atelectasis: ATEL
-               Cardiomegaly: CMG
-               Consolidation: CONS
-               Edema: EDE
-               Pleural Effusion: PLEF
-           '''
+        Atelectasis: ATEL
+        Cardiomegaly: CMG
+        Consolidation: CONS
+        Edema: EDE
+        Pleural Effusion: PLEF
+        '''
         abbrevviations = ["ATEL-pos", "ATEL-neg", "CMG-pos", "CMG-neg", "CONS-pos", "CONS-neg",
                           "EDE-pos", "EDE-neg", "PLEF-pos", "PLEF-neg"]
 
@@ -1491,11 +1283,11 @@ class Trainer:
         fig, ax = plt.subplots()
         im, cbar = heatmap(heat_map, [i for i in abbrevviations], [j for j in abbrevviations],
                            ax=ax,
-                           cmap="YlGn", cbarlabel="Cosine similarity heatmap" + str_prompts)
+                           cmap="YlGn", cbarlabel="Cosine similarity heatmap" + str_prompts, metric="COS")
         texts = annotate_heatmap(im, valfmt="{x:.2f}")
         fig.tight_layout()
         if epochs > 0 and epoch == 1:
-            img_path = 'cosine_similarity_heat_map.png'
+            img_path = 'cosine_similarity_heat_map_fix.png'
             # load the PNG image
             image = read_image(img_path)
             # convert the image to a grid
@@ -1506,35 +1298,101 @@ class Trainer:
         if epochs > 0:
             self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, epoch)
 
-    def profIncremental(self, epoch, epochs, actual_task, threshold):
-        # at the end of the epoch, compare the updated image_adapter with the image_adapter copy
-        n_reset = 0
-        n_updated = 0
-        for (name1, param1), (name2, param2) in zip(model.named_parameters(), model_copy.named_parameters()):
-            # compare the values of the individual weights
-            diff = torch.abs(param1 - param2)
+    def myIncremental(self, threshold, iteration):
+        if IMAGE_MODEL:
+            for (name1, param1), (name2, param2) in zip(self.image_adapter.named_parameters(),
+                                                        self.image_adapter_copy.named_parameters()):
+                # compare the values of the individual weights
+                diff = torch.abs(param1 - param2)
+                minimum = diff.min()
+                maximum = diff.max()
+                # compute the threshold value
+                to_reset = minimum + threshold * (maximum - minimum)
+                mask = diff < to_reset
 
-            minimum = diff.min()
-            maximum = diff.max()
-            # compute the threshold value
-            to_reset = minimum + threshold * (maximum - minimum)
-            mask = diff < to_reset
+                self.n_reset += torch.sum(torch.eq(mask, True))
+                self.n_updated += torch.sum(torch.eq(mask, False))
+                # reset the updated weights to the old values
+                param1.data[mask] = param2.data[mask]
+        if TEXT_MODEL:
+            for (name1, param1), (name2, param2) in zip(self.text_adapter.named_parameters(),
+                                                        self.text_adapter_copy.named_parameters()):
+                # compare the values of the individual weights
+                diff = torch.abs(param1 - param2)
+                minimum = diff.min()
+                maximum = diff.max()
+                # compute the threshold value
+                to_reset = minimum + threshold * (maximum - minimum)
+                mask = diff < to_reset
 
-            n_reset += torch.sum(torch.eq(mask, True))
-            n_updated += torch.sum(torch.eq(mask, False))
-            # reset the updated weights to the old values
-            param1.data[mask] = param2.data[mask]
+                self.n_reset += torch.sum(torch.eq(mask, True))
+                self.n_updated += torch.sum(torch.eq(mask, False))
+                # reset the updated weights to the old values
+                param1.data[mask] = param2.data[mask]
+
         print()
-        print("number of resets:", n_reset.item(), "number of updates:", n_updated.item(), "percentage resets",
-              n_reset.item() / (n_reset.item() + n_updated.item()))
-        self.writer.add_scalar("monitor-resets/resets", n_reset.item(), (actual_task - 1) * epochs + epoch)
-        self.writer.add_scalar("monitor-resets/updates", n_updated.item(), (actual_task - 1) * epochs + epoch)
+        print("number of resets:", self.n_reset.item(), "number of updates:", self.n_updated.item(),
+              "percentage resets",
+              self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()))
+        self.writer.add_scalar("train monitor-resets/resets", self.n_reset.item(), iteration)
+        self.writer.add_scalar("train monitor-resets/updates", self.n_updated.item(), iteration)
+        self.writer.add_scalar("train monitor-resets/percentage resets",
+                               self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()),
+                               iteration)
+        self.n_reset = 0
+        self.n_updated = 0
+
+    def profIncremental(self, epoch, epochs, actual_task, threshold):
+        if IMAGE_MODEL:
+            for (name1, param1), (name2, param2) in zip(self.image_adapter.named_parameters(),
+                                                        self.image_adapter_copy.named_parameters()):
+                # compare the values of the individual weights
+                diff = torch.abs(param1 - param2)
+                minimum = diff.min()
+                maximum = diff.max()
+                # compute the threshold value
+                to_reset = minimum + threshold * (maximum - minimum)
+                mask = diff < to_reset
+
+                self.n_reset += torch.sum(torch.eq(mask, True))
+                self.n_updated += torch.sum(torch.eq(mask, False))
+                # reset the updated weights to the old values
+                param1.data[mask] = param2.data[mask]
+        if TEXT_MODEL:
+            for (name1, param1), (name2, param2) in zip(self.text_adapter.named_parameters(),
+                                                        self.text_adapter_copy.named_parameters()):
+                # compare the values of the individual weights
+                diff = torch.abs(param1 - param2)
+                minimum = diff.min()
+                maximum = diff.max()
+                # compute the threshold value
+                to_reset = minimum + threshold * (maximum - minimum)
+                mask = diff < to_reset
+
+                self.n_reset += torch.sum(torch.eq(mask, True))
+                self.n_updated += torch.sum(torch.eq(mask, False))
+                # reset the updated weights to the old values
+                param1.data[mask] = param2.data[mask]
+
+        print()
+        print("number of resets:", self.n_reset.item(), "number of updates:", self.n_updated.item(),
+              "percentage resets",
+              self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()))
+        self.writer.add_scalar("monitor-resets/resets", self.n_reset.item(), (actual_task - 1) * epochs + epoch)
+        self.writer.add_scalar("monitor-resets/updates", self.n_updated.item(), (actual_task - 1) * epochs + epoch)
         self.writer.add_scalar("monitor-resets/percentage resets",
-                               n_reset.item() / (n_reset.item() + n_updated.item()),
+                               self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()),
                                (actual_task - 1) * epochs + epoch)
+        self.n_reset = 0
+        self.n_updated = 0
 
     def model_copy(self):
-        model_copy = copy.deepcopy(model)
+        if IMAGE_MODEL:
+            self.image_adapter_copy = copy.deepcopy(self.image_adapter)
+        if TEXT_MODEL:
+            self.text_adapter_copy = copy.deepcopy(self.text_adapter)
+        self.n_reset = 0
+        self.n_updated = 0
 
 
 def change_values(tensor):
