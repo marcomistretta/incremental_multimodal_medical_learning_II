@@ -32,19 +32,19 @@ from models import myLinearModel, myMLP
 
 # zero shot o SHARED true, IMAGE true TEXT true
 # oppure con SHARED false, IMAGE false TEXT false
-SHARED = False  # True,  False # xxx shared true mette gli altri due a true <3
+SHARED = True  # True,  False # xxx shared true mette gli altri due a true <3
 # con shared false invece si può fare che ci pare
 IMAGE_MODEL = True  # True, False
 TEXT_MODEL = True  # True, False
 MODEL_USED = "mlp"  # mlp, dense, "no-head"
-
+OPTIM = "sgd"  # sgd
 CHANGE_LABELS = False
+NEW_PROMPTS = True
 from io import BytesIO
 from PIL import Image
 
 
 class Trainer:
-
     def __init__(self, single_prompt, prompts, class_names, loss_name, lr, device, writer):
         self.n_reset = 0
         self.n_updated = 0
@@ -115,8 +115,12 @@ class Trainer:
         print("image adapter", self.image_adapter)  # xxx print summary
         print("text adapter", self.text_adapter)  # xxx print summary
         if len(params) > 0:
-            print("Creating Adam optimizer...")
-            self.optimizer = optim.Adam(params, lr=lr)
+            if OPTIM == "adam":
+                print("Creating Adam optimizer...")
+                self.optimizer = optim.Adam(params, lr=lr)
+            elif OPTIM == "sgd":
+                print("Creating SGD optimizer...")
+                self.optimizer = optim.SGD(params, lr=lr)
             for param_group in self.optimizer.param_groups:
                 for name, param in param_group.items():
                     if name == 'params':
@@ -198,7 +202,7 @@ class Trainer:
             prompts = basic_create_prompts(class_names)
         else:
             str_basic = "-mean-prompt"
-            prompts = create_prompts(class_names)
+            prompts = create_prompts(class_names, NEW_PROMPTS)
         if epochs > 0:
             suffix = "-" + MODEL_USED
             if SHARED:
@@ -209,8 +213,8 @@ class Trainer:
                 elif IMAGE_MODEL:
                     suffix += "-only-image-adapter"
                 elif TEXT_MODEL:
-                    suffix += "-only-text-adapeter"
-            w_path = "./zero-and-joint-bounds-cosine/joint-train-loss-" + str(loss_name) + "-lr-" + str(
+                    suffix += "-only-text-adapter"
+            w_path = "./zero-and-joint-bounds-new-prompts/joint-train-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
@@ -222,10 +226,12 @@ class Trainer:
             else:
                 raise Exception
             print("Attenzione! Zero-shot evaluation!")
-            w_path = "./zero-and-joint-bounds-cosine/zero-shot-model" + chex_str + str_basic + "-" + str(
+            w_path = "./zero-and-joint-bounds-new-prompts/zero-shot-model" + chex_str + str_basic + "-" + str(
                 xrays_position) + suffix
         # w_path = "./joint-training/rapid_check"
-        w_path = w_path + "-DEBUG-texts"
+        # w_path = w_path + "-DEBUG"
+        if NEW_PROMPTS:
+            w_path = w_path + "-NEW-PROMPTS"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -234,7 +240,7 @@ class Trainer:
     @staticmethod
     def preprocessing_class_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
                                         epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
-                                        threshold=None, tasks_order=None):
+                                        threshold=None, threshold_scheduling=False, adder=0.01):
 
         if CONTINUAL_LEARNING is not None:
             print("**** Gradient Clipping ****")
@@ -270,17 +276,23 @@ class Trainer:
             Trainer.count_positive_labels(test_loader)
             print()
 
+        thre_str = ""
+        if threshold_scheduling and CONTINUAL_LEARNING is not None:
+            thre_str = "-th-scheduled-" + str(adder)
         cl_str = ""
         if CONTINUAL_LEARNING is not None and ratio:
-            cl_str = "-" + CONTINUAL_LEARNING + "-ratio-" + threshold
-        mode = "fine-tuning-" + mode
+            cl_str = "-" + str(CONTINUAL_LEARNING) + "-ratio-" + str(threshold)
+            mode = "gradient-clipping-" + mode
+        else:
+            mode = "fine-tuning-" + mode
+        # mode = "fine-tuning-" + mode
         # todo add cose rigardo CONTINUAL LERARNING, threshold, ratio
         if basic_prompts:
             str_basic = "-single-prompt"
             prompts = basic_create_prompts(class_names)
         else:
             str_basic = "-mean-prompt"
-            prompts = create_prompts(class_names)
+            prompts = create_prompts(class_names, NEW_PROMPTS)
         if epochs > 0:
             suffix = "-" + MODEL_USED
             if SHARED:
@@ -292,72 +304,110 @@ class Trainer:
                     suffix += "-only-image-adapter"
                 elif TEXT_MODEL:
                     suffix += "-only-text-adapeter"
-            w_path = "./only-" + mode + "/" + mode + "-loss-" + str(loss_name) + "-lr-" + str(
+            # w_path = "./only-" + mode + "/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
+            #     lr) + "-bs" + str(
+            #     batch_size) + "-ep" + str(
+            #     epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
+            w_path = "comparison/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
+                epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str + thre_str
 
         if epochs == 0:
             raise Exception
         # w_path = "./joint-training/rapid_check"
         # w_path = w_path + "-DEBUG"
+        if NEW_PROMPTS:
+            w_path = w_path + "-NEW-PROMPTS"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
         return writer, class_names, train_loader, val_loader, test_loader, prompts
 
-    # @staticmethod  # xxx prep for data-incremental
-    # def preprocessing_data_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
-    #                                    epochs, CONTINUAL_LEARNING, threshold, ratio):
-    #
-    #     if CONTINUAL_LEARNING is not None:
-    #         print("**** Gradient Clipping ****")
-    #         print("--->", CONTINUAL_LEARNING)
-    #
-    #     else:
-    #         print("**** NO Gradient Clipping ****")
-    #
-    #     train_loader = Trainer.split_dataloader_data_incremental(train_loader, epochs)
-    #
-    #     # Trainer.print_dataloader_stats(train_loader) xxx to do unmute
-    #
-    #     print("TrainBS:", batch_size, "Val/Test Batch size default set to 1024")
-    #     if basic_prompts:
-    #         str_basic = "-NO-prompt"
-    #         prompts = basic_create_prompts(class_names)
-    #     else:
-    #         str_basic = "-mean-prompt"
-    #         prompts = create_prompts(class_names)
-    #
-    #     # w_path = "./continual-scenario/fine-tuning-online-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(epochs) + chex_str + str_basic
-    #     w_path = "./data_incremental/not-adapter-lr" + str(lr) + "-bs" + str(batch_size) + "-ep" + str(
-    #         epochs) + chex_str + str_basic
-    #     ratio_string = ""
-    #     if ratio:
-    #         ratio_string = "-ratio"
-    #     if CONTINUAL_LEARNING == "profCL":
-    #         w_path = "./data_incremental/adapter-epoch-level-tr" + str(threshold) + ratio_string + "-lr" + str(
-    #             lr) + "-bs" + str(batch_size) + "-ep" + str(
-    #             epochs) + chex_str + str_basic
-    #     if CONTINUAL_LEARNING == "myCL":
-    #         w_path = "./data_incremental/adapter-batch-level-tr" + str(threshold) + ratio_string + "-lr" + str(
-    #             lr) + "-bs" + str(
-    #             batch_size) + "-ep" + str(
-    #             epochs) + chex_str + str_basic
-    #     print("writer path:", w_path)
-    #     writer = SummaryWriter(w_path)
-    #
-    #     return writer, class_names, train_loader, val_loader, test_loader, prompts
+    @staticmethod  # xxx prep for data-incremental
+    def preprocessing_data_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+                                       parts, epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
+                                       threshold=None, threshold_scheduling=False, adder=0.01):
+
+        if CONTINUAL_LEARNING is not None:
+            print("**** Gradient Clipping ****")
+            print("--->", CONTINUAL_LEARNING)
+        else:
+            print("**** NO Gradient Clipping ****")
+
+        class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition,
+                                                                                              xrays_position,
+                                                                                              batch_size)
+
+        if mode == "data-inc":
+            print("number of parts:", parts)
+            train_loader = Trainer.split_dataloader_data_incremental(train_loader, parts)
+            # Trainer.print_dataloader_stats(train_loader)  # xxx to do unmute
+        else:
+            raise Exception
+
+        thre_str = ""
+        if CONTINUAL_LEARNING is not None and threshold_scheduling:
+            thre_str = "-th-scheduled-" + str(adder)
+        cl_str = ""
+        if CONTINUAL_LEARNING is not None and ratio:
+            cl_str = "-" + str(CONTINUAL_LEARNING) + "-ratio-" + str(threshold)
+            mode = "gradient-clipping-" + mode
+        else:
+            mode = "fine-tuning-" + mode
+        # mode = "fine-tuning-" + mode
+        # todo add cose rigardo CONTINUAL LERARNING, threshold, ratio
+        if basic_prompts:
+            str_basic = "-single-prompt"
+            prompts = basic_create_prompts(class_names)
+        else:
+            str_basic = "-mean-prompt"
+            prompts = create_prompts(class_names, NEW_PROMPTS)
+        if epochs > 0:
+            suffix = "-" + MODEL_USED
+            if SHARED:
+                suffix += "-SHARED-adapter"
+            else:
+                if IMAGE_MODEL and TEXT_MODEL:
+                    suffix += "-double-adapter"
+                elif IMAGE_MODEL:
+                    suffix += "-only-image-adapter"
+                elif TEXT_MODEL:
+                    suffix += "-only-text-adapeter"
+            # w_path = "./only-" + mode + "/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
+            #     lr) + "-bs" + str(
+            #     batch_size) + "-ep" + str(
+            #     epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
+            w_path = "data-incremental/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
+                lr) + "-bs" + str(
+                batch_size) + "-ep" + str(
+                epochs) + "-parts" + str(
+                parts) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str + thre_str
+
+        if epochs == 0:
+            raise Exception
+        # w_path = "./joint-training/rapid_check"
+        # w_path = w_path + "-DEBUG"
+        if NEW_PROMPTS:
+            w_path = w_path + "-NEW-PROMPTS"
+        print("writer path:", w_path)
+        writer = SummaryWriter(w_path)
+
+        return writer, class_names, train_loader, val_loader, test_loader, prompts
 
     # xxx works for normal and for data-incremental
     def train(self, train_loader, criterion, epoch, CONTINUAL_LEARNING=None, threshold=None,
-              scheduler=None):
+              scheduler=None, part=None, epochs=None):
         batch_idx = 0
         if IMAGE_MODEL:
             self.image_adapter.train()
         if TEXT_MODEL:
             self.text_adapter.train()
-        for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert, Epoch " + str(epoch)):
+        if part is None:
+            str_part = ""
+        else:
+            str_part = " part-"+str(part)
+        for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert,"+str_part+" Epoch " + str(epoch)):
             if CONTINUAL_LEARNING == "myCL":
                 self.model_copy()
             self.optimizer.zero_grad()
@@ -372,17 +422,15 @@ class Trainer:
 
             if self.loss_name == "standard":
                 logits = torch.empty(labels.shape[0], 5).to(self.device)
-            elif self.loss_name == "cosine":
-                input_1 = torch.empty(0, 128).to(self.device)
-                input_2 = torch.empty(0, 128).to(self.device)
-                targets = torch.tensor([]).to(self.device)
+            elif self.loss_name == "ce":
+                loss = 0.0  # logits = torch.empty(labels.shape[0], 2).to(self.device)
 
             i = -1
             for label_name in self.class_names:
                 i += 1
+
                 pos_prompt = self.prompts[label_name]["positive"]
                 neg_prompt = self.prompts[label_name]["negative"]
-
                 pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
                 if TEXT_MODEL:
                     pos_prompt_embedding = pos_prompt_embedding.to(self.device)
@@ -391,7 +439,6 @@ class Trainer:
                 if not self.basic_prompts:
                     pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
                 pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
-
                 neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
                 if TEXT_MODEL:
                     neg_prompt_embedding = neg_prompt_embedding.to(self.device)
@@ -400,33 +447,36 @@ class Trainer:
                 if not self.basic_prompts:
                     neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
                 neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+                pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
 
                 if self.loss_name == "standard":
                     # Calculate the similarities between the image and the positive and negative prompts
-                    pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
-                    neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
                     logits[:, i] = pos_similarities - neg_similarities
-                elif self.loss_name == "cosine":
-                    tmp_1 = alternate_tensors(neg_prompt_embedding, pos_prompt_embedding, labels.shape[0])
-                    input_1 = torch.cat([input_1, tmp_1], dim=0)
-                    tmp_2 = duplicate_rows(new_embs)
-                    input_2 = torch.cat([input_2, tmp_2], dim=0)
-                    tmp_3 = double_length_tensor(labels[:, i])
-                    targets = torch.cat([targets, tmp_3], dim=0)
+                elif self.loss_name == "ce":
+                    logits_i = torch.cat([neg_similarities.unsqueeze(1), pos_similarities.unsqueeze(1)], dim=1)
+                    loss_i = criterion[i](logits_i, labels[:, i].long())
+                    # add the loss to the total loss
+                    loss += loss_i
 
             if self.change_labels:
                 labels = change_values(labels)
+
             if self.loss_name == "standard":
                 loss = criterion(logits, labels)
-            elif self.loss_name == "cosine":
-                loss = criterion(input_1, input_2, targets)
+                loss.backward()
+            elif self.loss_name == "ce":
+                loss.backward()
 
-            loss.backward()
             self.optimizer.step()
-            iteration = (epoch - 1) * len(train_loader) + batch_idx
+
+            if part is None:
+                iteration = (epoch - 1) * len(train_loader) + batch_idx
+            else:
+                iteration = (part - 1) * epochs * len(train_loader) + (epoch - 1) * len(train_loader) + batch_idx
 
             if CONTINUAL_LEARNING == "myCL":
-                self.myIncremental(epoch, threshold, iteration)
+                self.myIncremental(threshold, iteration)
 
             if self.writer is not None:
                 self.writer.add_scalar('train/Loss', loss.item(), iteration)
@@ -461,7 +511,10 @@ class Trainer:
                 new_embs = embs
             new_embs = F.normalize(new_embs, dim=-1)
 
-            logits = torch.zeros(labels.shape[0]).to(self.device)
+            if self.loss_name == "standard":
+                logits = torch.zeros(labels.shape[0]).to(self.device)
+            else:
+                raise Exception  # logits = torch.empty(labels.shape[0], 2).to(self.device)
 
             # for label_name in self.class_names:
             label_name = self.class_names[current_task]
@@ -533,8 +586,6 @@ class Trainer:
             self.text_adapter.eval()
         with torch.no_grad():
             for embs, labels in tqdm(val_loader, desc="Validating on chexpert mode: " + mode + ", Epoch " + str(epoch)):
-                if self.loss_name == "opzione2" or self.loss_name == "opzione2variant":
-                    loss = 0.0
                 batch_idx += 1
                 embs = embs.to(self.device)
                 labels = labels.to(self.device)
@@ -548,10 +599,8 @@ class Trainer:
 
                 if self.loss_name == "standard":
                     logits = torch.empty(labels.shape[0], 5).to(self.device)
-                elif self.loss_name == "cosine":
-                    input_1 = torch.empty(0, 128).to(self.device)
-                    input_2 = torch.empty(0, 128).to(self.device)
-                    targets = torch.tensor([]).to(self.device)
+                elif self.loss_name == "ce":
+                    loss = 0.0
 
                 i = -1
                 for label_name in self.class_names:
@@ -583,13 +632,11 @@ class Trainer:
                     if self.loss_name == "standard":
                         # Calculate the similarities between the image and the positive and negative prompts
                         logits[:, i] = pos_similarities - neg_similarities
-                    elif self.loss_name == "cosine":
-                        tmp_1 = alternate_tensors(neg_prompt_embedding, pos_prompt_embedding, labels.shape[0])
-                        input_1 = torch.cat([input_1, tmp_1], dim=0)
-                        tmp_2 = duplicate_rows(new_embs)
-                        input_2 = torch.cat([input_2, tmp_2], dim=0)
-                        tmp_3 = double_length_tensor(labels[:, i])
-                        targets = torch.cat([targets, tmp_3], dim=0)
+                    elif self.loss_name == "ce":
+                        logits_i = torch.cat([neg_similarities.unsqueeze(1), pos_similarities.unsqueeze(1)], dim=1)
+                        loss_i = criterion[i](logits_i, labels[:, i].long())
+                        # add the loss to the total loss
+                        loss += loss_i
 
                     pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                     neg_similarities = neg_similarities.reshape(-1, 1)
@@ -604,8 +651,8 @@ class Trainer:
                 # loss = criterion(logits, labels)  # todo occhio alla differenza loss_ non loss_
                 if self.loss_name == "standard":
                     loss = criterion(logits, labels)
-                elif self.loss_name == "cosine":
-                    loss = criterion(input_1, input_2, targets)
+                elif self.loss_name == "ce":
+                    pass
 
                 iteration = (epoch - 1) * len(val_loader) + batch_idx
                 if self.writer is not None:
@@ -658,7 +705,7 @@ class Trainer:
             self.val_f1_heat_map = torch.cat([self.val_f1_heat_map, tmp_f1], dim=0)
             self.val_auroc_heat_map = torch.cat([self.val_auroc_heat_map, tmp_auroc], dim=0)
 
-            if epoch == epochs and (mode == "joint" or mode == "zero"):
+            if epoch == epochs and (mode == "joint" or mode == "zero" or mode == "data-inc"):
                 self.val_f1_heat_map = numpy.array(self.val_f1_heat_map)
                 fig, ax = plt.subplots()
                 im, cbar = heatmap(self.val_f1_heat_map, [i for i in range(1, epochs + 1)],
@@ -679,7 +726,7 @@ class Trainer:
                 # plt.show()
                 self.writer.add_figure('val/joint train/AUROC score Heatmap', fig)
 
-            if epoch == 4 and (mode == "class-pos-neg" or mode == "class-pos"):
+            if epoch == 5 and (mode == "class-pos-neg" or mode == "class-pos"):
                 self.val_f1_heat_map = numpy.array(self.val_f1_heat_map)
                 fig, ax = plt.subplots()
                 im, cbar = heatmap(self.val_f1_heat_map, [self.class_names[i] for i in tasks_order],
@@ -828,7 +875,7 @@ class Trainer:
             self.test_f1_heat_map = torch.cat([self.test_f1_heat_map, tmp_f1], dim=0)
             self.test_auroc_heat_map = torch.cat([self.test_auroc_heat_map, tmp_auroc], dim=0)
 
-            if epoch == 4 and (mode == "class-pos-neg" or mode == "class-pos"):
+            if epoch == 5 and (mode == "class-pos-neg" or mode == "class-pos"):
                 self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
                 fig, ax = plt.subplots()
                 im, cbar = heatmap(self.test_f1_heat_map, [self.class_names[i] for i in tasks_order],
@@ -849,7 +896,7 @@ class Trainer:
                 # plt.show()
                 self.writer.add_figure("test/" + mode + ' incremental/AUROC score Heatmap', fig)
 
-            if epoch == epochs and (mode == "joint" or mode == "zero"):
+            if epoch == epochs and (mode == "joint" or mode == "zero" or mode == "data-inc"):
                 self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
                 fig, ax = plt.subplots()
                 im, cbar = heatmap(self.test_f1_heat_map, [i for i in range(1, epochs + 1)],
@@ -941,9 +988,13 @@ class Trainer:
         subset_size = math.ceil(num_samples / n)
         subsets = [Subset(dataset, range(i * subset_size, min((i + 1) * subset_size, num_samples))) for i in range(n)]
 
+        # dataloaders = [
+        #     DataLoader(subset, batch_size=dataloader.batch_size, sampler=RandomSampler(subset), num_workers=1,
+        #                pin_memory=True, drop_last=False, persistent_workers=True) for subset in subsets]
         dataloaders = [
             DataLoader(subset, batch_size=dataloader.batch_size, sampler=RandomSampler(subset), num_workers=1,
                        pin_memory=True, drop_last=False, persistent_workers=True) for subset in subsets]
+
         return dataloaders
 
     @staticmethod  # for class-incremental info
@@ -1097,7 +1148,7 @@ class Trainer:
             # convert the image to a grid
             self.writer.add_image('visual-embeddings/PCA text-embs', image, 0)
 
-        if epoch == 0 and epochs == 0:
+        if epoch == 0 and epochs == 0:  # zero-shot recalculated
             self.writer.add_figure('visual-embeddings/PCA text-embs', fig, 0)
         if epochs > 0:
             self.writer.add_figure('visual-embeddings/PCA text-embs', fig, epoch)
@@ -1240,6 +1291,7 @@ class Trainer:
         if epochs > 0:
             self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, epoch)
 
+    @torch.no_grad()
     def myIncremental(self, threshold, iteration):
         if IMAGE_MODEL:
             for (name1, param1), (name2, param2) in zip(self.image_adapter.named_parameters(),
@@ -1276,14 +1328,15 @@ class Trainer:
         print("number of resets:", self.n_reset.item(), "number of updates:", self.n_updated.item(),
               "percentage resets",
               self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()))
-        self.writer.add_scalar("train monitor-resets/resets", self.n_reset.item(), iteration)
-        self.writer.add_scalar("train monitor-resets/updates", self.n_updated.item(), iteration)
-        self.writer.add_scalar("train monitor-resets/percentage resets",
+        self.writer.add_scalar("monitor-resets/resets", self.n_reset.item(), iteration)
+        self.writer.add_scalar("monitor-resets/updates", self.n_updated.item(), iteration)
+        self.writer.add_scalar("monitor-resets/percentage resets",
                                self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()),
                                iteration)
         self.n_reset = 0
         self.n_updated = 0
 
+    @torch.no_grad()
     def profIncremental(self, epoch, epochs, actual_task, threshold):
         if IMAGE_MODEL:
             for (name1, param1), (name2, param2) in zip(self.image_adapter.named_parameters(),
@@ -1328,6 +1381,7 @@ class Trainer:
         self.n_reset = 0
         self.n_updated = 0
 
+    @torch.no_grad()
     def model_copy(self):
         if IMAGE_MODEL:
             self.image_adapter_copy = copy.deepcopy(self.image_adapter)
@@ -1336,6 +1390,8 @@ class Trainer:
         self.n_reset = 0
         self.n_updated = 0
 
+
+@torch.no_grad()
 def change_values(tensor):
     """
     Takes a 2D torch tensor of float32 with 0 and 1 values and changes 1 to 2 and 0 to -2.
@@ -1376,6 +1432,8 @@ def change_values(tensor):
 #     return torch.tensor(concatenated).to(t1.device)
 #
 #
+
+@torch.no_grad()
 def double_length_tensor(tensor):
     # Create a tensor of the same dtype and device as the input tensor
     output_tensor = torch.empty(2 * len(tensor), dtype=tensor.dtype, device=tensor.device)
@@ -1390,6 +1448,8 @@ def double_length_tensor(tensor):
             raise Exception
     return output_tensor
 
+
+@torch.no_grad()
 def alternate_tensors(neg_emb, pos_emb, N):
     """
     This function takes two 1-d tensors of equal size and an integer N, and returns a 2-d torch tensor
@@ -1404,6 +1464,7 @@ def alternate_tensors(neg_emb, pos_emb, N):
     return tensor_repeated.to(neg_emb.device)
 
 
+@torch.no_grad()
 def duplicate_rows(input_tensor):
     # batch_size, emb_dim = input_tensor.shape
     output_tensor = torch.repeat_interleave(input_tensor, 2, dim=0)

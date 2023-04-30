@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 from torchvision.io import read_image
 
 # from csv import reader
+from new_texts_prompts import generate_chexpert_class_prompts
 
 plt.ion()
 
@@ -177,7 +178,8 @@ class DataRetrieval:
 
 def get_bio_vil_pipeline(size):
     augmentation = transforms.Compose(
-        [transforms.ToPILImage(), transforms.Resize(size), transforms.CenterCrop(size), transforms.ToTensor(), ExpandChannels()])
+        [transforms.ToPILImage(), transforms.Resize(size), transforms.CenterCrop(size), transforms.ToTensor(),
+         ExpandChannels()])
 
     return augmentation
 
@@ -193,17 +195,23 @@ def basic_create_prompts(class_list):
     return prompts
 
 
-def create_prompts(class_list):
-    print("*** Multiple Prompting ***")
-    prompts = {}
-    for c in class_list:
-        prompts[c] = {
-            "positive": [f"Findings consistent with {c}", f"Findings suggesting {c}",
-                         f"This opacity can represent {c}", f"Findings are most compatible with {c}"],
-            "negative": [f"There is no {c}", f"No evidence of {c}",
-                         f"No evidence of acute {c}", f"No signs of {c}"]
-        }
-    return prompts
+def create_prompts(class_list, new_prompts=False):
+    if not new_prompts:
+        print("*** Multiple Prompting ***")
+        prompts = {}
+        for c in class_list:
+            prompts[c] = {
+                "positive": [f"Findings consistent with {c}", f"Findings suggesting {c}",
+                             f"This opacity can represent {c}", f"Findings are most compatible with {c}"],
+                "negative": [f"There is no {c}", f"No evidence of {c}",
+                             f"No evidence of acute {c}", f"No signs of {c}"]
+            }
+        return prompts
+    else:
+        print()
+        print("--------------- NEW PROMPTS ---------------")
+        return generate_chexpert_class_prompts()
+
 
 if __name__ == '__main__':
     class_list = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]

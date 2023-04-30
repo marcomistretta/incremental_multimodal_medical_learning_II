@@ -23,7 +23,7 @@ if __name__ == '__main__':
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
     xrays_position = "all"  # "all", "frontal", "lateral"
-    loss_name = "cosine"  # standard, opzione2, opzione2variant cosine
+    loss_name = "standard"  # standard, opzione2, opzione2variant cosine
     writer, class_names, train_loader, val_loader, test_loader, prompts = Trainer.preprocessing(chex_competition,
                                                                                                 xrays_position,
                                                                                                 single_prompt,
@@ -33,9 +33,9 @@ if __name__ == '__main__':
     if loss_name == "standard":
         print("*** BCEWithLogitsLoss ***")
         criterion = nn.BCEWithLogitsLoss()  # nn.BCEWithLogitsLoss() nn.CrossEntropyLoss
-    elif loss_name == "cosine":
-        print("*** COSINE EMBEDDING LOSS ***")
-        criterion = nn.CosineEmbeddingLoss(margin=-1)
+    elif loss_name == "ce":
+        print("*** 5 CrossEntropyLoss ***")
+        criterion = [nn.CrossEntropyLoss() for i in range(5)]
 
     trainer = Trainer(single_prompt, prompts, class_names, loss_name, lr, device, writer)
 

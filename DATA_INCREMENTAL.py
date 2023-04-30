@@ -6,7 +6,7 @@ Qua posso provare tutte le loss che voglio
 
 '''
 import copy
-
+import playsound
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -46,60 +46,51 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("running on:", device)
 
-    batch_size = 50  # 50 5120  # 4096, 6144 8192, 8192 (val e test sono settati di default a 1024 per avere dei plot meno rumorosi)
-    lr = 0.001  # 0.1  # 0.0001, 1, 30
-    epochs = 500  # xxx == tasks
-
-    # XXX run
-    CONTINUAL_LEARNING = "myCL"  # None "myCL", "profCL"
-    threshold = 0.5  # 6e-3
-    ratio = True
-
+    batch_size = 6144  # 4096, 6144 8192, 8192 (val e test sono settati di default a 1024 per avere dei plot meno rumorosi)
+    lr = 0.1  # 0.001  # 0.1  # 0.0001, 1, 30
+    parts = 10  # 5, 10, 20
+    epochs = 10  # 10
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
     xrays_position = "all"  # "all", "frontal", "lateral"
-    loss_name = "standard"  # standard, opzione2, opzione2variant
+    loss_name = "standard"  # "standard", "opzione2" "opzione2variant", "bce"
+
+    CONTINUAL_LEARNING = None  # "profCL"  # "myCL"  # "myCL", "profCL", None
+    threshold = 0.01
+    ratio = True
+    adder = 0.001
+    threshold_scheduling = True
+
+    mode = "data-inc"
 
     writer, class_names, train_loader, val_loader, test_loader, prompts = Trainer.preprocessing_data_incremental(
-        chex_competition,
-        xrays_position,
-        single_prompt,
-        batch_size, lr, epochs, CONTINUAL_LEARNING, threshold, ratio)
-
+        chex_competition, xrays_position, single_prompt, batch_size, lr,
+        parts, epochs, loss_name, mode, CONTINUAL_LEARNING, ratio,
+        threshold, threshold_scheduling, adder)
 
     criterion = nn.BCEWithLogitsLoss()
     trainer = Trainer(single_prompt, prompts, class_names, loss_name, lr, device, writer)
 
-    for epoch in range(1, epochs + 1):
-        if CONTINUAL_LEARNING == "profCL":
-            # make a copy of the original image_adapter before starting the training loop
-            model_copy = copy.deepcopy(model)
-            # define the threshold for parameter updates
-            trainer.train(train_loader[epoch - 1], criterion, epoch, CONTINUAL_LEARNING, threshold)
-            if CONTINUAL_LEARNING == "profCL":
-                # at the end of the epoch, compare the updated image_adapter with the image_adapter copy
-                n_reset = 0
-                n_updated = 0
-                for (name1, param1), (name2, param2) in zip(model.named_parameters(), model_copy.named_parameters()):
-                    # compare the values of the individual weights
-                    diff = torch.abs(param1 - param2)
-
-                    minimum = diff.min()
-                    maximum = diff.max()
-                    # compute the threshold value
-                    to_reset = minimum + threshold * (maximum - minimum)
-                    mask = diff < to_reset
-
-                    n_reset += torch.sum(torch.eq(mask, True))
-                    n_updated += torch.sum(torch.eq(mask, False))
-                    # reset the updated weights to the old values
-                    param1.data[mask] = param2.data[mask]
-                print()
-                print("number of resets:", n_reset.item(), "number of updates:", n_updated.item(), "percentage resets",
-                      n_reset.item() / (n_reset.item() + n_updated.item()))
-                writer.add_scalar("monitor-resets/resets", n_reset.item(), epoch)
-                writer.add_scalar("monitor-resets/updates", n_updated.item(), epoch)
-                writer.add_scalar("monitor-resets/percentage resets", n_reset.item() / (n_reset.item() + n_updated.item()),
-                                  epoch)
-        trainer.val(val_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
-        trainer.test(test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
+    count = 0
+    try:
+        for part in range(1, parts + 1):
+            for epoch in range(1, epochs + 1):
+                count += 1
+                threshold = threshold + adder
+                if threshold_scheduling and CONTINUAL_LEARNING is not None:
+                    writer.add_scalar("monitor-resets/threshold-scheduling", threshold, count)
+                if CONTINUAL_LEARNING == "profCL":
+                    trainer.model_copy()
+                trainer.train(train_loader[part - 1], criterion, epoch,
+                              CONTINUAL_LEARNING, threshold, part=part, epochs=epochs)
+                if CONTINUAL_LEARNING == "profCL":
+                    trainer.profIncremental(epoch, epochs, part, threshold)
+                torch.cuda.empty_cache()
+            train_loader[part - 1] = None
+            trainer.val(val_loader, criterion, part, parts, mode="data-inc", tasks_order=part)
+            trainer.test(test_loader, criterion, part, parts, mode="data-inc", tasks_order=part)
+    except Exception as e:
+        print(f"An exception occurred: {e}")
+    finally:
+        # Play a sound to notify the end of the execution
+        playsound.playsound("mixkit-correct-answer-tone-2870.wav")
