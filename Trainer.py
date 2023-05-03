@@ -1,5 +1,6 @@
 import copy
 import math
+import random
 import warnings
 
 from sklearn.decomposition import PCA
@@ -16,7 +17,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from matplotlib import pyplot as plt
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score, \
-    precision_recall_curve
+    precision_recall_curve, roc_curve
 from torch.utils.data import Dataset, DataLoader, RandomSampler, ConcatDataset, TensorDataset, Subset
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
@@ -30,17 +31,30 @@ from models import myLinearModel, myMLP
 
 # zero shot o SHARED true, IMAGE true TEXT true
 # oppure con SHARED false, IMAGE false TEXT false
-SHARED = True  # True,  False # xxx shared true mette gli altri due a true <3
+SHARED = False  # True,  False # xxx shared true mette gli altri due a true <3
 # con shared false invece si può fare che ci pare
 IMAGE_MODEL = True  # True, False
 TEXT_MODEL = True  # True, False
 MODEL_USED = "mlp"  # mlp, dense, "no-head"
+UNDER_SAMPLE = False
+OPTIM = "adam"  # sgd
 
-OPTIM = "sgd"  # sgd
 CHANGE_LABELS = False
 NEW_PROMPTS = False
 from io import BytesIO
 from PIL import Image
+
+
+def filter_dataloader(dataloader):
+    filtered_dataset = []
+    for input, label in dataloader.dataset:
+        if (label.tolist() != [0.0, 0.0, 0.0, 0.0, 0.0] and label.tolist() != [1.0, 1.0, 1.0, 1.0,
+                                                                               1.0]) or random.random() < 0.1:
+            filtered_dataset.append((input, label))
+
+    filtered_dataloader = DataLoader(filtered_dataset, sampler=None, batch_size=dataloader.batch_size,
+                                     shuffle=True, num_workers=4, pin_memory=True, drop_last=False)
+    return filtered_dataloader
 
 
 class Trainer:
@@ -196,8 +210,15 @@ class Trainer:
         class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition,
                                                                                               xrays_position,
                                                                                               batch_size)
+
+        if UNDER_SAMPLE:
+            print("pre undersample", len(train_loader.dataset))
+            train_loader = filter_dataloader(train_loader)
+            print("after undersample", len(train_loader.dataset))
         folder_name = "zero-and-joint-bounds-new-prompts"
         folder_name = "new-prompts-only-pos"
+        folder_name = "INTATA"
+        folder_name = "NUOVI_RISULTATI/zero-and-joint"
         if single_prompt:
             str_basic = "-single-prompt"
             prompts = basic_create_prompts(class_names)
@@ -234,6 +255,8 @@ class Trainer:
         # w_path = w_path + "-DEBUG"
         if NEW_PROMPTS:
             w_path = w_path + "-NEW-PROMPTS"
+        if UNDER_SAMPLE:
+            w_path = w_path + "-UNDER-SAMPLE"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -242,7 +265,7 @@ class Trainer:
     @staticmethod
     def preprocessing_class_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
                                         epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
-                                        threshold=None, threshold_scheduling=False, adder=0.01, MORE_LABELS = False):
+                                        threshold=None, threshold_scheduling=False, adder=0.01, MORE_LABELS=False):
 
         if CONTINUAL_LEARNING is not None:
             print("**** Gradient Clipping ****")
@@ -596,6 +619,7 @@ class Trainer:
         batch_idx = 0
         y_true = []
         y_pred = []
+        y_score = []  # xxx
         if IMAGE_MODEL:
             self.image_adapter.eval()
         if TEXT_MODEL:
@@ -612,6 +636,7 @@ class Trainer:
                 new_embs = F.normalize(new_embs, dim=-1)
 
                 predicted_labels = torch.zeros(labels.shape[0], 5).to(self.device)
+                tmp_score = torch.zeros(labels.shape[0], 5).to(self.device)  # xxx
 
                 if self.loss_name == "standard" or self.loss_name == "bce-only-pp":
                     logits = torch.empty(labels.shape[0], 5).to(self.device)
@@ -644,6 +669,8 @@ class Trainer:
 
                         pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
                         neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
+                        tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
+                        # tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
 
                         if self.loss_name == "standard":
                             # Calculate the similarities between the image and the positive and negative prompts
@@ -697,25 +724,35 @@ class Trainer:
                 if self.change_labels:
                     y_true.append(tmp.cpu().numpy())
                 y_pred.append(predicted_labels_np)
+                y_score.append(tmp_score.cpu().numpy())  # xxx
 
         # Concatenate the true and predicted labels
         y_true = np.concatenate(y_true)
         y_pred = np.concatenate(y_pred)
+        y_score = np.concatenate(y_score)  # xxx
 
         # Calculate the metrics
         accuracy = accuracy_score(y_true, y_pred)
         f1_macro = f1_score(y_true, y_pred, average="macro")
         f1_weighted = f1_score(y_true, y_pred, average="weighted")
-        auroc_macro = roc_auc_score(y_true, y_pred, average="macro", multi_class="ovr")
-        auroc_weighted = roc_auc_score(y_true, y_pred, average="weighted", multi_class="ovr")
+        auroc_macro = roc_auc_score(y_true, y_score, average="macro", multi_class="ovr")
+        auroc_weighted = roc_auc_score(y_true, y_score, average="weighted", multi_class="ovr")
         precision = precision_score(y_true, y_pred, average="weighted")
         recall = recall_score(y_true, y_pred, average="weighted")
 
         # Calculate precision-recall curve for each class
         precision_curve = []
         recall_curve = []
+
+        fpr_list = []
+        tpr_list = []
         for i in range(5):
+            fpr, tpr, thresholds = roc_curve(y_true[:, i], y_score[:, i])  # GIGAFIX
+            fpr_list.append(fpr)
+            tpr_list.append(tpr)
+
             precision_i, recall_i, thresholds = precision_recall_curve(y_true[:, i], y_pred[:, i])
+            # TODO GIGA FIX ADD valore di AUPRC
             precision_curve.append(precision_i)
             recall_curve.append(recall_i)
 
@@ -730,7 +767,7 @@ class Trainer:
             tmp_auroc = torch.zeros(1, 5)
             for i in range(5):
                 tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])
-                tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_pred[:, i])
+                tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_score[:, i])
 
             self.val_f1_heat_map = torch.cat([self.val_f1_heat_map, tmp_f1], dim=0)
             self.val_auroc_heat_map = torch.cat([self.val_auroc_heat_map, tmp_auroc], dim=0)
@@ -797,6 +834,13 @@ class Trainer:
                 plt.title('Precision-Recall Curve for Class ' + str(i))
                 plt.legend(loc="lower left")
                 self.writer.add_figure('val Precision-Recall Curve/Curve for Class ' + str(i), fig, epoch)
+            for i in range(5):
+                fig = plt.figure()
+                plt.plot(fpr_list[i], tpr_list[i])
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title('ROC Curve for Class ' + str(i))
+                self.writer.add_figure('val ROC Curve/Curve for Class ' + str(i), fig, epoch)
 
     @torch.no_grad()
     def test(self, test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None):
@@ -806,6 +850,7 @@ class Trainer:
         '''
         y_true = []
         y_pred = []
+        y_score = []  # xxx
         if IMAGE_MODEL:
             self.image_adapter.eval()
         if TEXT_MODEL:
@@ -826,6 +871,7 @@ class Trainer:
                 new_embs = F.normalize(new_embs, dim=-1)
 
                 predicted_labels = torch.zeros(labels.shape[0], 5).to(self.device)
+                tmp_score = torch.zeros(labels.shape[0], 5).to(self.device)  # xxx
 
                 i = -1
                 for label_name in self.class_names:
@@ -855,11 +901,14 @@ class Trainer:
                         # Calculate the similarities between the image and the positive and negative prompts
                         pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
                         neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
+                        tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
+                        # tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
 
                         pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                         neg_similarities = neg_similarities.reshape(-1, 1)
                         predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1),
                                                               dim=1)
+
                         # predicted_labels[:, i] = pos_similarities - neg_similarities  # XXX grandissima differnza
                     else:
                         pos_prompt = self.prompts[label_name]
@@ -874,6 +923,8 @@ class Trainer:
                         # pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                         predicted_labels[:, i] = torch.where(pos_similarities.cpu() > 0, torch.tensor(1),
                                                              torch.tensor(0))
+                        tmp_score[:, i] = (pos_similarities + 1) / 2
+                        # tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
 
                 # Convert the predicted labels to a numpy array
                 predicted_labels_np = predicted_labels.cpu().numpy()
@@ -881,25 +932,35 @@ class Trainer:
                 # Append the true and predicted labels to the lists
                 y_true.append(labels.cpu().numpy())
                 y_pred.append(predicted_labels_np)
+                y_score.append(tmp_score.cpu().numpy())  # xxx
 
         # Concatenate the true and predicted labels
         y_true = np.concatenate(y_true)
         y_pred = np.concatenate(y_pred)
+        y_score = np.concatenate(y_score)  # xxx
 
         # Calculate the metrics
-        accuracy = accuracy_score(y_true, y_pred)
-        f1_macro = f1_score(y_true, y_pred, average="macro")
-        f1_weighted = f1_score(y_true, y_pred, average="weighted")
-        auroc_macro = roc_auc_score(y_true, y_pred, average="macro", multi_class="ovr")
-        auroc_weighted = roc_auc_score(y_true, y_pred, average="weighted", multi_class="ovr")
-        precision = precision_score(y_true, y_pred, average="weighted")
-        recall = recall_score(y_true, y_pred, average="weighted")
+        accuracy = accuracy_score(y_true, y_pred)  # OK
+        f1_macro = f1_score(y_true, y_pred, average="macro")  # OK
+        f1_weighted = f1_score(y_true, y_pred, average="weighted")  # OK
+        auroc_macro = roc_auc_score(y_true, y_score, average="macro", multi_class="ovr")  # TODO
+        auroc_weighted = roc_auc_score(y_true, y_score, average="weighted", multi_class="ovr")  # TODO
+        precision = precision_score(y_true, y_pred, average="weighted")  # OK
+        recall = recall_score(y_true, y_pred, average="weighted")  # OK
 
         # Calculate precision-recall curve for each class
         precision_curve = []
         recall_curve = []
+
+        fpr_list = []
+        tpr_list = []
         for i in range(5):
-            precision_i, recall_i, thresholds = precision_recall_curve(y_true[:, i], y_pred[:, i])
+            fpr, tpr, thresholds = roc_curve(y_true[:, i], y_score[:, i])  # GIGAFIX
+            fpr_list.append(fpr)
+            tpr_list.append(tpr)
+
+            precision_i, recall_i, thresholds = precision_recall_curve(y_true[:, i], y_score[:, i])  # GIGAFIX
+            # TODO GIGA FIX ADD valore di AUPRC
             precision_curve.append(precision_i)
             recall_curve.append(recall_i)
 
@@ -913,32 +974,11 @@ class Trainer:
             tmp_f1 = torch.zeros(1, 5)
             tmp_auroc = torch.zeros(1, 5)
             for i in range(5):
-                tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])
-                tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_pred[:, i])
+                tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])  # OK
+                tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_score[:, i])  # TODO
 
             self.test_f1_heat_map = torch.cat([self.test_f1_heat_map, tmp_f1], dim=0)
             self.test_auroc_heat_map = torch.cat([self.test_auroc_heat_map, tmp_auroc], dim=0)
-
-            if epoch == 5 and (mode == "class-pos-neg" or mode == "class-pos"):
-                self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.test_f1_heat_map, [self.class_names[i] for i in tasks_order],
-                                   [self.class_names[i] for i in tasks_order], ax=ax,
-                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure("test/" + mode + ' incremental/F1 score Heatmap', fig)
-
-                self.test_auroc_heat_map = numpy.array(self.test_auroc_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.test_auroc_heat_map, [self.class_names[i] for i in tasks_order],
-                                   [self.class_names[i] for i in tasks_order], ax=ax,
-                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure("test/" + mode + ' incremental/AUROC score Heatmap', fig)
 
             if epoch == epochs and (mode == "joint" or mode == "zero" or mode == "data-inc"):
                 self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
@@ -961,20 +1001,35 @@ class Trainer:
                 # plt.show()
                 self.writer.add_figure('test/joint train/AUROC score Heatmap', fig)
 
+            if epoch == 5 and (mode == "class-pos-neg" or mode == "class-pos"):
+                self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
+                fig, ax = plt.subplots()
+                im, cbar = heatmap(self.test_f1_heat_map, [self.class_names[i] for i in tasks_order],
+                                   [self.class_names[i] for i in tasks_order], ax=ax,
+                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
+                texts = annotate_heatmap(im, valfmt="{x:.2f}")
+                fig.tight_layout()
+                # plt.show()
+                self.writer.add_figure("test/" + mode + ' incremental/F1 score Heatmap', fig)
+
+                self.test_auroc_heat_map = numpy.array(self.test_auroc_heat_map)
+                fig, ax = plt.subplots()
+                im, cbar = heatmap(self.test_auroc_heat_map, [self.class_names[i] for i in tasks_order],
+                                   [self.class_names[i] for i in tasks_order], ax=ax,
+                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
+                texts = annotate_heatmap(im, valfmt="{x:.2f}")
+                fig.tight_layout()
+                # plt.show()
+                self.writer.add_figure("test/" + mode + ' incremental/AUROC score Heatmap', fig)
+
             x = [1, 2, 3, 4, 5]
             acc_y = []
             prec_y = []
             rec_y = []
             for i in range(5):
-                acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))
-                prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))
-                rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))
-                # self.writer.add_scalar("val/Class Accuracy",
-                #                        accuracy_score(y_true[:, i], y_pred[:, i]), i)
-                # self.writer.add_scalar("val/Class Precision",
-                #                        precision_score(y_true[:, i], y_pred[:, i]), i)
-                # self.writer.add_scalar("val/Class Recall",
-                #                        recall_score(y_true[:, i], y_pred[:, i]), i)
+                acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))  # OK
+                prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))  # OK
+                rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))  # OK
             self.my_scatter_plt(x_axis=x, y_axis=acc_y, metric="Accuracy", epoch=epoch, mode="test")
             self.my_scatter_plt(x_axis=x, y_axis=prec_y, metric="Precision", epoch=epoch, mode="test")
             self.my_scatter_plt(x_axis=x, y_axis=rec_y, metric="Recall", epoch=epoch, mode="test")
@@ -987,10 +1042,15 @@ class Trainer:
                 plt.title('Precision-Recall Curve for Class ' + str(i))
                 plt.legend(loc="lower left")
                 self.writer.add_figure('test Precision-Recall Curve/Curve for Class ' + str(i), fig, epoch)
+            for i in range(5):
+                fig = plt.figure()
+                plt.plot(fpr_list[i], tpr_list[i])
+                plt.xlabel('False Positive Rate')
+                plt.ylabel('True Positive Rate')
+                plt.title('ROC Curve for Class ' + str(i))
+                self.writer.add_figure('test ROC Curve/Curve for Class ' + str(i), fig, epoch)
 
-        # if (epoch == epochs and TEXT_MODEL) or (epoch == 0 and epochs == 0):
-        #     self.plot_cosine_similarity_text_embs()
-        #     self.plot_new_text_embeddings()
+
         if self.loss_name != "bce-only-pp":
             self.plot_cosine_similarity_text_embs(epoch, epochs)
             self.plot_new_text_embeddings(epoch, epochs)
