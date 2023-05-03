@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import playsound
 from torch import nn
 
 from Trainer import Trainer
@@ -23,7 +24,7 @@ if __name__ == '__main__':
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
     xrays_position = "all"  # "all", "frontal", "lateral"
-    loss_name = "standard"  # standard, opzione2, opzione2variant cosine
+    loss_name = "standard"  # "bce-only-pp"  # standard, opzione2, opzione2variant cosine
     writer, class_names, train_loader, val_loader, test_loader, prompts = Trainer.preprocessing(chex_competition,
                                                                                                 xrays_position,
                                                                                                 single_prompt,
@@ -32,29 +33,43 @@ if __name__ == '__main__':
 
     if loss_name == "standard":
         print("*** BCEWithLogitsLoss ***")
+        # define the percentages of positive examples for each class
         criterion = nn.BCEWithLogitsLoss()  # nn.BCEWithLogitsLoss() nn.CrossEntropyLoss
     elif loss_name == "ce":
         print("*** 5 CrossEntropyLoss ***")
         criterion = [nn.CrossEntropyLoss() for i in range(5)]
+    # elif loss_name == "5-bce-only-pp":
+    #     print("*** 5 BCEWithLogitsLoss SOLO PROMPTS POSITIVI ***")
+    #     criterion = [nn.BCEWithLogitsLoss() for i in range(5)]
+    elif loss_name == "bce-only-pp":
+        print("*** BCEWithLogitsLoss SOLO PROMPTS POSITIVI ***")
+        criterion = nn.BCEWithLogitsLoss()
 
     trainer = Trainer(single_prompt, prompts, class_names, loss_name, lr, device, writer)
 
     # XXX run
     CONTINUAL_LEARNING = None  # "myCL", "profCL"
     threshold = 0.5
-    if CONTINUAL_LEARNING is not None:
-        print("**** CONTINUAL LEARNING ****")
-        print("--->", CONTINUAL_LEARNING)
-    else:
-        if epochs == 0:
-            print("**** zero-shot ****")
+
+    try:
+        if CONTINUAL_LEARNING is not None:
+            print("**** CONTINUAL LEARNING ****")
+            print("--->", CONTINUAL_LEARNING)
+        else:
+            if epochs == 0:
+                print("**** zero-shot ****")
+            if epochs > 0:
+                print("**** joint-train ****")
         if epochs > 0:
-            print("**** joint-train ****")
-    if epochs > 0:
-        for epoch in range(1, epochs + 1):
-            trainer.train(train_loader, criterion, epoch, CONTINUAL_LEARNING, threshold)
-            trainer.val(val_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
-            trainer.test(test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
-    else:
-        trainer.val(val_loader, criterion, 0, 0, mode="zero", tasks_order=None)
-        trainer.test(test_loader, criterion, 0, 0, mode="zero", tasks_order=None)
+            for epoch in range(1, epochs + 1):
+                trainer.train(train_loader, criterion, epoch, CONTINUAL_LEARNING, threshold)
+                trainer.val(val_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
+                trainer.test(test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
+        else:
+            trainer.val(val_loader, criterion, 0, 0, mode="zero", tasks_order=None)
+            trainer.test(test_loader, criterion, 0, 0, mode="zero", tasks_order=None)
+    except Exception as e:
+        print(f"An exception occurred: {e}")
+    finally:
+        # Play a sound to notify the end of the execution
+        playsound.playsound("mixkit-correct-answer-tone-2870.wav")

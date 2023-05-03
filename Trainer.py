@@ -25,8 +25,6 @@ from tqdm import tqdm
 
 from DataRetrieval import basic_create_prompts, create_prompts
 
-# change_labels = False
-# loss_name = "standard"  # "standard" "opzione2"
 from HeatMapPlotter import heatmap, annotate_heatmap
 from models import myLinearModel, myMLP
 
@@ -37,9 +35,10 @@ SHARED = True  # True,  False # xxx shared true mette gli altri due a true <3
 IMAGE_MODEL = True  # True, False
 TEXT_MODEL = True  # True, False
 MODEL_USED = "mlp"  # mlp, dense, "no-head"
+
 OPTIM = "sgd"  # sgd
 CHANGE_LABELS = False
-NEW_PROMPTS = True
+NEW_PROMPTS = False
 from io import BytesIO
 from PIL import Image
 
@@ -197,6 +196,8 @@ class Trainer:
         class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition,
                                                                                               xrays_position,
                                                                                               batch_size)
+        folder_name = "zero-and-joint-bounds-new-prompts"
+        folder_name = "new-prompts-only-pos"
         if single_prompt:
             str_basic = "-single-prompt"
             prompts = basic_create_prompts(class_names)
@@ -214,7 +215,8 @@ class Trainer:
                     suffix += "-only-image-adapter"
                 elif TEXT_MODEL:
                     suffix += "-only-text-adapter"
-            w_path = "./zero-and-joint-bounds-new-prompts/joint-train-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
+
+            w_path = "./" + folder_name + "/joint-train-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
@@ -226,7 +228,7 @@ class Trainer:
             else:
                 raise Exception
             print("Attenzione! Zero-shot evaluation!")
-            w_path = "./zero-and-joint-bounds-new-prompts/zero-shot-model" + chex_str + str_basic + "-" + str(
+            w_path = "./" + folder_name + "/zero-shot-model" + chex_str + str_basic + "-" + str(
                 xrays_position) + suffix
         # w_path = "./joint-training/rapid_check"
         # w_path = w_path + "-DEBUG"
@@ -240,7 +242,7 @@ class Trainer:
     @staticmethod
     def preprocessing_class_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
                                         epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
-                                        threshold=None, threshold_scheduling=False, adder=0.01):
+                                        threshold=None, threshold_scheduling=False, adder=0.01, MORE_LABELS = False):
 
         if CONTINUAL_LEARNING is not None:
             print("**** Gradient Clipping ****")
@@ -308,7 +310,7 @@ class Trainer:
             #     lr) + "-bs" + str(
             #     batch_size) + "-ep" + str(
             #     epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
-            w_path = "comparison/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
+            w_path = "ultimo-only-class-pos/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str + thre_str
@@ -319,6 +321,8 @@ class Trainer:
         # w_path = w_path + "-DEBUG"
         if NEW_PROMPTS:
             w_path = w_path + "-NEW-PROMPTS"
+        if MORE_LABELS:
+            w_path += "-MORE-LABELS"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -406,8 +410,8 @@ class Trainer:
         if part is None:
             str_part = ""
         else:
-            str_part = " part-"+str(part)
-        for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert,"+str_part+" Epoch " + str(epoch)):
+            str_part = " part-" + str(part)
+        for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert," + str_part + " Epoch " + str(epoch)):
             if CONTINUAL_LEARNING == "myCL":
                 self.model_copy()
             self.optimizer.zero_grad()
@@ -420,7 +424,7 @@ class Trainer:
                 new_embs = embs
             new_embs = F.normalize(new_embs, dim=-1)
 
-            if self.loss_name == "standard":
+            if self.loss_name == "standard" or self.loss_name == "bce-only-pp":
                 logits = torch.empty(labels.shape[0], 5).to(self.device)
             elif self.loss_name == "ce":
                 loss = 0.0  # logits = torch.empty(labels.shape[0], 2).to(self.device)
@@ -428,41 +432,53 @@ class Trainer:
             i = -1
             for label_name in self.class_names:
                 i += 1
+                if self.loss_name != "bce-only-pp":
+                    pos_prompt = self.prompts[label_name]["positive"]
+                    neg_prompt = self.prompts[label_name]["negative"]
+                    pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                    if TEXT_MODEL:
+                        pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                        pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                    assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+                    if not self.basic_prompts:
+                        pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+                    pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+                    neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+                    if TEXT_MODEL:
+                        neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                        neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
+                    assert neg_prompt_embedding.shape[0] == len(neg_prompt)
+                    if not self.basic_prompts:
+                        neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
+                    neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+                    pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                    neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
 
-                pos_prompt = self.prompts[label_name]["positive"]
-                neg_prompt = self.prompts[label_name]["negative"]
-                pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
-                if TEXT_MODEL:
-                    pos_prompt_embedding = pos_prompt_embedding.to(self.device)
-                    pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
-                assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-                if not self.basic_prompts:
+                    if self.loss_name == "standard":
+                        # Calculate the similarities between the image and the positive and negative prompts
+                        logits[:, i] = pos_similarities - neg_similarities
+                    elif self.loss_name == "ce":
+                        logits_i = torch.cat([neg_similarities.unsqueeze(1), pos_similarities.unsqueeze(1)], dim=1)
+                        loss_i = criterion[i](logits_i, labels[:, i])
+
+                        # add the loss to the total loss
+                        loss += loss_i
+                else:
+                    pos_prompt = self.prompts[label_name]
+                    pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                    if TEXT_MODEL:
+                        pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                        pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                    assert pos_prompt_embedding.shape[0] == len(pos_prompt)
                     pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
-                pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
-                neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
-                if TEXT_MODEL:
-                    neg_prompt_embedding = neg_prompt_embedding.to(self.device)
-                    neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
-                assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-                if not self.basic_prompts:
-                    neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
-                neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
-                pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
-                neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
-
-                if self.loss_name == "standard":
-                    # Calculate the similarities between the image and the positive and negative prompts
-                    logits[:, i] = pos_similarities - neg_similarities
-                elif self.loss_name == "ce":
-                    logits_i = torch.cat([neg_similarities.unsqueeze(1), pos_similarities.unsqueeze(1)], dim=1)
-                    loss_i = criterion[i](logits_i, labels[:, i].long())
-                    # add the loss to the total loss
-                    loss += loss_i
+                    pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+                    pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                    logits[:, i] = pos_similarities
 
             if self.change_labels:
                 labels = change_values(labels)
 
-            if self.loss_name == "standard":
+            if self.loss_name == "standard" or self.loss_name == "bce-only-pp":
                 loss = criterion(logits, labels)
                 loss.backward()
             elif self.loss_name == "ce":
@@ -597,7 +613,7 @@ class Trainer:
 
                 predicted_labels = torch.zeros(labels.shape[0], 5).to(self.device)
 
-                if self.loss_name == "standard":
+                if self.loss_name == "standard" or self.loss_name == "bce-only-pp":
                     logits = torch.empty(labels.shape[0], 5).to(self.device)
                 elif self.loss_name == "ce":
                     loss = 0.0
@@ -605,43 +621,57 @@ class Trainer:
                 i = -1
                 for label_name in self.class_names:
                     i += 1
-                    pos_prompt = self.prompts[label_name]["positive"]
-                    neg_prompt = self.prompts[label_name]["negative"]
 
-                    pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
-                    if TEXT_MODEL:
-                        pos_prompt_embedding = pos_prompt_embedding.to(self.device)
-                        pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
-                    assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-                    if not self.basic_prompts:
+                    if self.loss_name != "bce-only-pp":
+                        pos_prompt = self.prompts[label_name]["positive"]
+                        neg_prompt = self.prompts[label_name]["negative"]
+                        pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                        if TEXT_MODEL:
+                            pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                            pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                        assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+                        if not self.basic_prompts:
+                            pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+                        pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+                        neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+                        if TEXT_MODEL:
+                            neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                            neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
+                        assert neg_prompt_embedding.shape[0] == len(neg_prompt)
+                        if not self.basic_prompts:
+                            neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
+                        neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+
+                        pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                        neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
+
+                        if self.loss_name == "standard":
+                            # Calculate the similarities between the image and the positive and negative prompts
+                            logits[:, i] = pos_similarities - neg_similarities
+                        elif self.loss_name == "ce":
+                            logits_i = torch.cat([neg_similarities.unsqueeze(1), pos_similarities.unsqueeze(1)], dim=1)
+                            loss_i = criterion[i](logits_i, labels[:, i].long())
+                            # add the loss to the total loss
+                            loss += loss_i
+
+                        pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
+                        neg_similarities = neg_similarities.reshape(-1, 1)
+                        predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1),
+                                                              dim=1)
+                    else:
+                        pos_prompt = self.prompts[label_name]
+                        pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                        if TEXT_MODEL:
+                            pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                            pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                        assert pos_prompt_embedding.shape[0] == len(pos_prompt)
                         pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
-                    pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
-
-                    neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
-                    if TEXT_MODEL:
-                        neg_prompt_embedding = neg_prompt_embedding.to(self.device)
-                        neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
-                    assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-                    if not self.basic_prompts:
-                        neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
-                    neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
-
-                    pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
-                    neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
-
-                    if self.loss_name == "standard":
-                        # Calculate the similarities between the image and the positive and negative prompts
-                        logits[:, i] = pos_similarities - neg_similarities
-                    elif self.loss_name == "ce":
-                        logits_i = torch.cat([neg_similarities.unsqueeze(1), pos_similarities.unsqueeze(1)], dim=1)
-                        loss_i = criterion[i](logits_i, labels[:, i].long())
-                        # add the loss to the total loss
-                        loss += loss_i
-
-                    pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
-                    neg_similarities = neg_similarities.reshape(-1, 1)
-                    predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1),
-                                                          dim=1)
+                        pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+                        pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                        logits[:, i] = pos_similarities
+                        # pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
+                        predicted_labels[:, i] = torch.where(pos_similarities.cpu() > 0, torch.tensor(1),
+                                                             torch.tensor(0))
 
                 # Compute loss and backpropagate
                 if self.change_labels:
@@ -649,7 +679,7 @@ class Trainer:
                     labels = change_values(labels)
                 # loss = criterion(loss_predicted_labels, loss_labels)  # todo occhio alla differenza loss_ non loss_
                 # loss = criterion(logits, labels)  # todo occhio alla differenza loss_ non loss_
-                if self.loss_name == "standard":
+                if self.loss_name == "standard" or self.loss_name == "bce-only-pp":
                     loss = criterion(logits, labels)
                 elif self.loss_name == "ce":
                     pass
@@ -801,35 +831,49 @@ class Trainer:
                 for label_name in self.class_names:
                     i += 1
                     # Get the positive and negative prompts for the label
-                    pos_prompt = self.prompts[label_name]["positive"]
-                    neg_prompt = self.prompts[label_name]["negative"]
+                    if self.loss_name != "bce-only-pp":
+                        pos_prompt = self.prompts[label_name]["positive"]
+                        neg_prompt = self.prompts[label_name]["negative"]
+                        pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                        if TEXT_MODEL:
+                            pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                            pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                        assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+                        if not self.basic_prompts:
+                            pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+                        pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
 
-                    pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
-                    if TEXT_MODEL:
-                        pos_prompt_embedding = pos_prompt_embedding.to(self.device)
-                        pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
-                    assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-                    if not self.basic_prompts:
+                        neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+                        if TEXT_MODEL:
+                            neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                            neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
+                        assert neg_prompt_embedding.shape[0] == len(neg_prompt)
+                        if not self.basic_prompts:
+                            neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
+                        neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+
+                        # Calculate the similarities between the image and the positive and negative prompts
+                        pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                        neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
+
+                        pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
+                        neg_similarities = neg_similarities.reshape(-1, 1)
+                        predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1),
+                                                              dim=1)
+                        # predicted_labels[:, i] = pos_similarities - neg_similarities  # XXX grandissima differnza
+                    else:
+                        pos_prompt = self.prompts[label_name]
+                        pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                        if TEXT_MODEL:
+                            pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                            pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                        assert pos_prompt_embedding.shape[0] == len(pos_prompt)
                         pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
-                    pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
-
-                    neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
-                    if TEXT_MODEL:
-                        neg_prompt_embedding = neg_prompt_embedding.to(self.device)
-                        neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
-                    assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-                    if not self.basic_prompts:
-                        neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
-                    neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
-
-                    # Calculate the similarities between the image and the positive and negative prompts
-                    pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
-                    neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
-
-                    pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
-                    neg_similarities = neg_similarities.reshape(-1, 1)
-                    predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1), dim=1)
-                    # predicted_labels[:, i] = pos_similarities - neg_similarities  # XXX grandissima differnza
+                        pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+                        pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                        # pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
+                        predicted_labels[:, i] = torch.where(pos_similarities.cpu() > 0, torch.tensor(1),
+                                                             torch.tensor(0))
 
                 # Convert the predicted labels to a numpy array
                 predicted_labels_np = predicted_labels.cpu().numpy()
@@ -947,9 +991,11 @@ class Trainer:
         # if (epoch == epochs and TEXT_MODEL) or (epoch == 0 and epochs == 0):
         #     self.plot_cosine_similarity_text_embs()
         #     self.plot_new_text_embeddings()
-
-        self.plot_cosine_similarity_text_embs(epoch, epochs)
-        self.plot_new_text_embeddings(epoch, epochs)
+        if self.loss_name != "bce-only-pp":
+            self.plot_cosine_similarity_text_embs(epoch, epochs)
+            self.plot_new_text_embeddings(epoch, epochs)
+        else:
+            self.plot_cosine_similarity_text_embs_only_pos_prompts(epoch, epochs)
 
     @staticmethod  # xxx for class-incremental one class with intersection
     def split_dataloader_by_label(dataloader, batch_size):
@@ -1198,6 +1244,70 @@ class Trainer:
             self.writer.add_figure('visual-embeddings/t-SNE text-embs', fig, epoch)
 
     @torch.no_grad()
+    def plot_cosine_similarity_text_embs_only_pos_prompts(self, epoch, epochs):
+        '''
+        Atelectasis: ATEL
+        Cardiomegaly: CMG
+        Consolidation: CONS
+        Edema: EDE
+        Pleural Effusion: PLEF
+        '''
+        abbrevviations = ["ATEL-pos", "CMG-pos", "CONS-pos", "EDE-pos", "PLEF-pos"]
+
+        cosine_similarity_heatmap = torch.zeros((5, 5))
+
+        for i, label_name_i in enumerate(self.class_names):
+            pos_prompt = self.prompts[label_name_i]
+
+            pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+            if TEXT_MODEL:
+                pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+            assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+            if not self.basic_prompts:
+                pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+            pos_emb_i = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+
+            for j, label_name_j in enumerate(self.class_names):
+                # print(j, label_name_j)
+                pos_prompt = self.prompts[label_name_j]
+
+                pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                if TEXT_MODEL:
+                    pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                    pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+                if not self.basic_prompts:
+                    pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+                pos_emb_j = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+
+                pos_similarities = torch.matmul(pos_emb_i, pos_emb_j)
+                cosine_similarity_heatmap[i, j] = pos_similarities
+
+        if self.basic_prompts:
+            str_prompts = "-single-prompt"
+        else:
+            str_prompts = "-multiple-prompts"
+        heat_map = numpy.array(cosine_similarity_heatmap)
+        fig, ax = plt.subplots()
+        im, cbar = heatmap(heat_map, [i for i in abbrevviations], [j for j in abbrevviations],
+                           ax=ax,
+                           cmap="YlGn", cbarlabel="Cosine similarity heatmap" + str_prompts, metric="COS")
+        texts = annotate_heatmap(im, valfmt="{x:.2f}")
+        fig.tight_layout()
+        if epochs > 0 and epoch == 1:
+            img_path = 'cosine_similarity_heat_map_fix.png'
+            # load the PNG image
+            image = read_image(img_path)
+            # convert the image to a grid
+            self.writer.add_image('visual-embeddings/cosine-similarity Heatmap text-embs', image, 0)
+
+        if epoch == 0 and epochs == 0:
+            self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, 0)
+        if epochs > 0:
+            self.writer.add_figure('visual-embeddings/cosine-similarity Heatmap text-embs', fig, epoch)
+
+    @torch.no_grad()
     def plot_cosine_similarity_text_embs(self, epoch, epochs):
         '''
         Atelectasis: ATEL
@@ -1389,6 +1499,94 @@ class Trainer:
             self.text_adapter_copy = copy.deepcopy(self.text_adapter)
         self.n_reset = 0
         self.n_updated = 0
+
+    def train_class_more_labels_incremental(self, train_loader, criterion, epoch, CONTINUAL_LEARNING=None,
+                                            threshold=None,
+                                            current_task=None,
+                                            last_batch=0):
+        # xxx ONE EPOCH TRAIN
+        batch_idx = last_batch
+        if IMAGE_MODEL:
+            self.image_adapter.train()
+        if TEXT_MODEL:
+            self.text_adapter.train()
+        for embs, labels in tqdm(train_loader,
+                                 desc="Fine-tuning on task " + str(current_task) + ", Epoch " + str(epoch)):
+            if CONTINUAL_LEARNING == "myCL":
+                self.model_copy()
+
+            self.optimizer.zero_grad()
+            batch_idx += 1
+            embs = embs.to(self.device)
+            labels = labels.to(self.device)
+            labels = labels[:, :current_task + 1]
+            if IMAGE_MODEL:
+                new_embs = self.image_adapter(embs)
+            else:
+                new_embs = embs
+            new_embs = F.normalize(new_embs, dim=-1)
+
+            if self.loss_name == "standard":
+                logits = torch.empty(labels.shape[0], current_task + 1).to(self.device)
+            else:
+                raise Exception  # logits = torch.empty(labels.shape[0], 2).to(self.device)
+
+            i = -1
+            for label_name in self.class_names[:current_task + 1]:
+                i += 1
+                pos_prompt = self.prompts[label_name]["positive"]
+                neg_prompt = self.prompts[label_name]["negative"]
+
+                pos_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(pos_prompt, normalize=False)
+                if TEXT_MODEL:
+                    pos_prompt_embedding = pos_prompt_embedding.to(self.device)
+                    pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
+                assert pos_prompt_embedding.shape[0] == len(pos_prompt)
+                if not self.basic_prompts:
+                    pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
+                pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
+                neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
+                if TEXT_MODEL:
+                    neg_prompt_embedding = neg_prompt_embedding.to(self.device)
+                    neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
+                assert neg_prompt_embedding.shape[0] == len(neg_prompt)
+                if not self.basic_prompts:
+                    neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
+                neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
+
+                # Calculate the similarities between the image and the positive and negative prompts
+                pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
+
+                # xxx pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
+                # xxx neg_similarities = neg_similarities.reshape(-1, 1)
+                # xxx NON E' DERIVABILE LOL Take the maximum similarity as the predicted label
+                # xxx predicted_labels[:, i] = torch.argmax(torch.cat([neg_similarities, pos_similarities], dim=1), dim=1)
+                if self.loss_name == "standard":
+                    logits[:, i] = pos_similarities - neg_similarities  # XXX grandissima differnza
+
+            # Compute loss and backpropagate
+            # todo fare tutte le loss
+            # loss figa con labels -2, 2 che ipoteticamnete spara pos a 1 neg a -1 e viceversa
+            if self.change_labels:
+                labels = change_values(labels)
+            # loss = criterion(predicted_labels, labels)
+
+            if self.loss_name == "standard":
+                loss = criterion(logits, labels)
+                loss.backward()
+            else:
+                raise Exception
+
+            self.optimizer.step()
+
+            iteration = batch_idx
+            if CONTINUAL_LEARNING == "myCL":
+                self.myIncremental(threshold, iteration)
+
+            if self.writer is not None:
+                self.writer.add_scalar('train/Loss', loss.item(), iteration)
+        return iteration
 
 
 @torch.no_grad()

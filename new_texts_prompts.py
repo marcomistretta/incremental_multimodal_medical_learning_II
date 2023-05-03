@@ -122,51 +122,36 @@ def generate_chexpert_class_prompts(n: int = 5):
 
         prompts[k] = random.sample(cls_prompts, n)
 
-    # diseases = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
-    # pos_neg_prompts = {}
-    # pos_neg_prompts[diseases[0]] = {
-    #     "positive": prompts["Atelectasis"],
-    #     "negative": ["No signs of collapsed lung tissue were found on the X-ray",
-    #                  "The patient's lungs appear clear and functioning properly",
-    #                  "There is no evidence of atelectasis on the CT scan",
-    #                  "The X-ray did not reveal any abnormalities associated with atelectasis",
-    #                  "The doctor confirmed that there is no atelectasis present in the patient's lungs"]
-    # }
-    #
-    # pos_neg_prompts[diseases[1]] = {
-    #     "positive": prompts["Cardiomegaly"],
-    #     "negative": ["The patient's heart appears normal in size and function",
-    #                  "The echocardiogram showed no signs of cardiomegaly",
-    #                  "The X-ray did not reveal any enlargement of the heart",
-    #                  "The doctor confirmed that there is no evidence of cardiomegaly in the patient's heart",
-    #                  "There are no symptoms or indications of cardiomegaly present in the patient"]
-    # }
-    #
-    # pos_neg_prompts[diseases[2]] = {
-    #     "positive": prompts["Consolidation"],
-    #     "negative": ["The X-ray and CT scan showed no evidence of lung consolidation",
-    #                  "There are no signs of consolidation on the patient's chest exam",
-    #                  "The doctor confirmed that there is no lung consolidation present in the patient",
-    #                  "The patient's lungs appear clear and healthy with no signs of consolidation",
-    #                  "The radiologist found no evidence of consolidation in the lung tissue"]
-    # }
-    #
-    # pos_neg_prompts[diseases[3]] = {
-    #     "positive": prompts["Edema"],
-    #     "negative": ["The patient's legs and feet show no signs of swelling or edema",
-    #                  "The doctor confirmed that there is no edema present in the patient's body",
-    #                  "The ultrasound did not reveal any signs of edema in the patient's tissues",
-    #                  "The patient has no symptoms or indications of edema",
-    #                  "The medical tests showed no evidence of fluid accumulation or edema"]
-    # }
-    #
-    # pos_neg_prompts[diseases[4]] = {
-    #     "positive": prompts["Pleural Effusion"],
-    #     "negative": ["There is no sign of fluid accumulation in the pleural space",
-    #                  "The chest X-ray showed no evidence of pleural effusion",
-    #                  "The patient's breathing sounds clear and there are no signs of pleural effusion",
-    #                  "The doctor confirmed that there is no pleural effusion present in the patient",
-    #                  "The ultrasound did not detect any pleural effusion in the patient's chest"]
-    # }
-    # return pos_neg_prompts
-    return prompts
+    diseases = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
+    pos_neg_prompts = {}
+    pos_neg_prompts[diseases[0]] = {
+        "positive": prompts["Atelectasis"],
+        "negative": [f"There is no Atelectasis", "No evidence of Atelectasis",
+                     "No evidence of acute Atelectasis", "No signs of Atelectasis"]
+    }
+
+    pos_neg_prompts[diseases[1]] = {
+        "positive": prompts["Cardiomegaly"],
+        "negative": ["There is no Cardiomegaly", "No evidence of Cardiomegaly",
+                     "No evidence of acute Cardiomegaly", "No signs of Cardiomegaly"]
+    }
+
+    pos_neg_prompts[diseases[2]] = {
+        "positive": prompts["Consolidation"],
+        "negative": ["There is no Consolidation", "No evidence of Consolidation",
+                     "No evidence of acute Consolidation", "No signs of Consolidation"]
+    }
+
+    pos_neg_prompts[diseases[3]] = {
+        "positive": prompts["Edema"],
+        "negative": ["There is no Edema", "No evidence of Edema",
+                     "No evidence of acute Edema", "No signs of Edema"]
+    }
+
+    pos_neg_prompts[diseases[4]] = {
+        "positive": prompts["Pleural Effusion"],
+        "negative": ["There is no Pleural Effusion", "No evidence of Pleural Effusion",
+                     "No evidence of acute Pleural Effusion", "No signs of Pleural Effusion"]
+    }
+    return pos_neg_prompts
+    # return prompts
