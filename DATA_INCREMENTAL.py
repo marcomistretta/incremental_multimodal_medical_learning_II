@@ -47,8 +47,8 @@ if __name__ == '__main__':
     print("running on:", device)
 
     batch_size = 6144  # 4096, 6144 8192, 8192 (val e test sono settati di default a 1024 per avere dei plot meno rumorosi)
-    lr = 0.1  # 0.001  # 0.1  # 0.0001, 1, 30
-    parts = 10  # 5, 10, 20
+    lr = 0.0001  # 0.001  # 0.1  # 0.0001, 1, 30
+    parts = 5  # 5, 10, 20
     epochs = 10  # 10
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
@@ -82,7 +82,7 @@ if __name__ == '__main__':
                 if CONTINUAL_LEARNING == "profCL":
                     trainer.model_copy()
                 trainer.train(train_loader[part - 1], criterion, epoch,
-                              CONTINUAL_LEARNING, threshold, part=part, epochs=epochs)
+                              CONTINUAL_LEARNING, threshold, part=part, epochs=epochs, actual_task=part)
                 if CONTINUAL_LEARNING == "profCL":
                     trainer.profIncremental(epoch, epochs, part, threshold)
                 torch.cuda.empty_cache()
@@ -93,4 +93,6 @@ if __name__ == '__main__':
         print(f"An exception occurred: {e}")
     finally:
         # Play a sound to notify the end of the execution
+        if epochs > 0:
+            trainer.save()
         playsound.playsound("mixkit-correct-answer-tone-2870.wav")

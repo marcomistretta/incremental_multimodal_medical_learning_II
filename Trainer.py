@@ -17,7 +17,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from matplotlib import pyplot as plt
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score, \
-    precision_recall_curve, roc_curve
+    precision_recall_curve, roc_curve, average_precision_score
 from torch.utils.data import Dataset, DataLoader, RandomSampler, ConcatDataset, TensorDataset, Subset
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
@@ -28,21 +28,23 @@ from DataRetrieval import basic_create_prompts, create_prompts
 
 from HeatMapPlotter import heatmap, annotate_heatmap
 from models import myLinearModel, myMLP
-
-# zero shot o SHARED true, IMAGE true TEXT true
-# oppure con SHARED false, IMAGE false TEXT false
-SHARED = False  # True,  False # xxx shared true mette gli altri due a true <3
-# con shared false invece si può fare che ci pare
-IMAGE_MODEL = True  # True, False
-TEXT_MODEL = True  # True, False
-MODEL_USED = "mlp"  # mlp, dense, "no-head"
-UNDER_SAMPLE = False
-OPTIM = "adam"  # sgd
-
-CHANGE_LABELS = False
-NEW_PROMPTS = False
 from io import BytesIO
 from PIL import Image
+
+# zero shot o SHARED true, IMAGE true TEXT true
+# oppure con SHARED false, IMAGE false e TEXT false
+SHARED = False  # True,  False # xxx shared true mette gli altri due a true <3
+# con shared false invece si può fare che ci pare
+IMAGE_MODEL = False  # True, False
+TEXT_MODEL = True  # True, False
+MODEL_USED = "mlp"  # mlp, dense, "no-head"
+
+OPTIM = "adam"  # sgd
+
+LOGIT_DIFF = False
+UNDER_SAMPLE = False
+CHANGE_LABELS = False
+NEW_PROMPTS = False
 
 
 def filter_dataloader(dataloader):
@@ -59,6 +61,7 @@ def filter_dataloader(dataloader):
 
 class Trainer:
     def __init__(self, single_prompt, prompts, class_names, loss_name, lr, device, writer):
+
         self.n_reset = 0
         self.n_updated = 0
         self.image_adapter_copy = None
@@ -257,6 +260,8 @@ class Trainer:
             w_path = w_path + "-NEW-PROMPTS"
         if UNDER_SAMPLE:
             w_path = w_path + "-UNDER-SAMPLE"
+        if LOGIT_DIFF:
+            w_path = w_path + "-LOGIT-DIFF"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -276,7 +281,10 @@ class Trainer:
         class_names, chex_str, train_loader, val_loader, test_loader = Trainer._preprocessing(chex_competition,
                                                                                               xrays_position,
                                                                                               batch_size)
-
+        folder_name = "./ultimo-only-class-pos"
+        folder_name = "./NUOVI_RISULTATI/" + mode
+        if MORE_LABELS:
+            folder_name += "-more-labels"
         if mode == "class-pos-neg":
             train_loader = Trainer.concat_to_tensor_dataloader(train_loader)
             train_loader = Trainer.split_dataloader_data_incremental(train_loader, 5)
@@ -333,7 +341,7 @@ class Trainer:
             #     lr) + "-bs" + str(
             #     batch_size) + "-ep" + str(
             #     epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
-            w_path = "ultimo-only-class-pos/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
+            w_path = folder_name + "/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str + thre_str
@@ -342,10 +350,14 @@ class Trainer:
             raise Exception
         # w_path = "./joint-training/rapid_check"
         # w_path = w_path + "-DEBUG"
-        if NEW_PROMPTS:
-            w_path = w_path + "-NEW-PROMPTS"
         if MORE_LABELS:
             w_path += "-MORE-LABELS"
+        if NEW_PROMPTS:
+            w_path = w_path + "-NEW-PROMPTS"
+        if UNDER_SAMPLE:
+            w_path = w_path + "-UNDER-SAMPLE"
+        if LOGIT_DIFF:
+            w_path = w_path + "-LOGIT-DIFF"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -356,6 +368,7 @@ class Trainer:
                                        parts, epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
                                        threshold=None, threshold_scheduling=False, adder=0.01):
 
+        folder_name = "NUOVI_RISULTATI/data-incremental-"+str(parts)+"-parts"
         if CONTINUAL_LEARNING is not None:
             print("**** Gradient Clipping ****")
             print("--->", CONTINUAL_LEARNING)
@@ -405,7 +418,8 @@ class Trainer:
             #     lr) + "-bs" + str(
             #     batch_size) + "-ep" + str(
             #     epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
-            w_path = "data-incremental/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
+            w_path = folder_name+"/" + mode + "-loss-" + str(
+                loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + "-parts" + str(
@@ -417,6 +431,10 @@ class Trainer:
         # w_path = w_path + "-DEBUG"
         if NEW_PROMPTS:
             w_path = w_path + "-NEW-PROMPTS"
+        if UNDER_SAMPLE:
+            w_path = w_path + "-UNDER-SAMPLE"
+        if LOGIT_DIFF:
+            w_path = w_path + "-LOGIT-DIFF"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
 
@@ -424,7 +442,7 @@ class Trainer:
 
     # xxx works for normal and for data-incremental
     def train(self, train_loader, criterion, epoch, CONTINUAL_LEARNING=None, threshold=None,
-              scheduler=None, part=None, epochs=None):
+              scheduler=None, part=None, epochs=None, actual_task=None):
         batch_idx = 0
         if IMAGE_MODEL:
             self.image_adapter.train()
@@ -436,7 +454,8 @@ class Trainer:
             str_part = " part-" + str(part)
         for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert," + str_part + " Epoch " + str(epoch)):
             if CONTINUAL_LEARNING == "myCL":
-                self.model_copy()
+                if actual_task > 1:
+                    self.model_copy()
             self.optimizer.zero_grad()
             batch_idx += 1
             embs = embs.to(self.device)
@@ -515,7 +534,8 @@ class Trainer:
                 iteration = (part - 1) * epochs * len(train_loader) + (epoch - 1) * len(train_loader) + batch_idx
 
             if CONTINUAL_LEARNING == "myCL":
-                self.myIncremental(threshold, iteration)
+                if actual_task > 1:
+                    self.myIncremental(threshold, iteration)
 
             if self.writer is not None:
                 self.writer.add_scalar('train/Loss', loss.item(), iteration)
@@ -524,10 +544,14 @@ class Trainer:
                 current_lr = self.optimizer.param_groups[0]['lr']
                 self.writer.add_scalar('train/LR', current_lr, iteration)
 
+        if CONTINUAL_LEARNING == "myCL":
+            if actual_task > 1:
+                self.myIncremental_save_log(iteration)
+
     # xxx works for class-incremental one class and both class
     def train_class_incremental(self, train_loader, criterion, epoch, CONTINUAL_LEARNING=None, threshold=None,
                                 current_task=None,
-                                last_batch=0):
+                                last_batch=0, actual_task=None):
         # xxx ONE EPOCH TRAIN
         batch_idx = last_batch
         if IMAGE_MODEL:
@@ -536,7 +560,7 @@ class Trainer:
             self.text_adapter.train()
         for embs, labels in tqdm(train_loader,
                                  desc="Fine-tuning on task " + str(current_task) + ", Epoch " + str(epoch)):
-            if CONTINUAL_LEARNING == "myCL":
+            if CONTINUAL_LEARNING == "myCL" and actual_task > 1:
                 self.model_copy()
 
             self.optimizer.zero_grad()
@@ -603,12 +627,28 @@ class Trainer:
             self.optimizer.step()
 
             iteration = batch_idx
-            if CONTINUAL_LEARNING == "myCL":
+            if CONTINUAL_LEARNING == "myCL" and actual_task > 1:
                 self.myIncremental(threshold, iteration)
 
             if self.writer is not None:
                 self.writer.add_scalar('train/Loss', loss.item(), iteration)
+        if CONTINUAL_LEARNING == "myCL" and actual_task > 1:
+            self.myIncremental_save_log(iteration)
         return iteration
+
+    @torch.no_grad()
+    def myIncremental_save_log(self, iteration):
+        print()
+        print("number of resets:", self.n_reset.item(), "number of updates:", self.n_updated.item(),
+              "percentage resets",
+              self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()))
+        self.writer.add_scalar("monitor-resets/resets", self.n_reset.item(), iteration)
+        self.writer.add_scalar("monitor-resets/updates", self.n_updated.item(), iteration)
+        self.writer.add_scalar("monitor-resets/percentage resets",
+                               self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()),
+                               iteration)
+        self.n_reset = 0
+        self.n_updated = 0
 
     @torch.no_grad()
     def val(self, val_loader, criterion, epoch, epochs, mode="joint", tasks_order=None):
@@ -669,8 +709,10 @@ class Trainer:
 
                         pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
                         neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
-                        tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
-                        # tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
+                        if not LOGIT_DIFF:
+                            tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
+                        if LOGIT_DIFF:
+                            tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
 
                         if self.loss_name == "standard":
                             # Calculate the similarities between the image and the positive and negative prompts
@@ -695,6 +737,10 @@ class Trainer:
                         pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
                         pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
                         pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
+                        if not LOGIT_DIFF:
+                            tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
+                        else:
+                            raise Exception
                         logits[:, i] = pos_similarities
                         # pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                         predicted_labels[:, i] = torch.where(pos_similarities.cpu() > 0, torch.tensor(1),
@@ -731,116 +777,127 @@ class Trainer:
         y_pred = np.concatenate(y_pred)
         y_score = np.concatenate(y_score)  # xxx
 
+        self.evaluate_model(y_true, y_pred, y_score, mode, epoch, "val", epochs, tasks_order)
+
+    @torch.no_grad()
+    def evaluate_model(self, y_true, y_pred, y_score, mode, epoch, val_test, epochs, tasks_order):
         # Calculate the metrics
-        accuracy = accuracy_score(y_true, y_pred)
-        f1_macro = f1_score(y_true, y_pred, average="macro")
-        f1_weighted = f1_score(y_true, y_pred, average="weighted")
-        auroc_macro = roc_auc_score(y_true, y_score, average="macro", multi_class="ovr")
-        auroc_weighted = roc_auc_score(y_true, y_score, average="weighted", multi_class="ovr")
-        precision = precision_score(y_true, y_pred, average="weighted")
-        recall = recall_score(y_true, y_pred, average="weighted")
+        accuracy = accuracy_score(y_true, y_pred)  # OK
+        f1_macro = f1_score(y_true, y_pred, average="macro")  # OK
+        f1_weighted = f1_score(y_true, y_pred, average="weighted")  # OK
+        auroc_macro = roc_auc_score(y_true, y_score, average="macro", multi_class="ovr")  # TODO
+        auroc_weighted = roc_auc_score(y_true, y_score, average="weighted", multi_class="ovr")  # TODO
+        precision = precision_score(y_true, y_pred, average="weighted")  # OK
+        recall = recall_score(y_true, y_pred, average="weighted")  # OK
 
-        # Calculate precision-recall curve for each class
-        precision_curve = []
-        recall_curve = []
-
-        fpr_list = []
-        tpr_list = []
         for i in range(5):
             fpr, tpr, thresholds = roc_curve(y_true[:, i], y_score[:, i])  # GIGAFIX
-            fpr_list.append(fpr)
-            tpr_list.append(tpr)
+            auc = roc_auc_score(y_true[:, i], y_score[:, i])
+            fig = plt.figure()
+            plt.plot(fpr, tpr, label='AUC = {:.3f}'.format(auc))
+            plt.xlabel('False Positive Rate')
+            plt.ylabel('True Positive Rate')
+            plt.title('ROC Curve for Class ' + str(i))
+            plt.legend(loc="lower right")
+            self.writer.add_figure(val_test + " ROC Curve/Curve for Class " + str(i), fig, epoch)
 
-            precision_i, recall_i, thresholds = precision_recall_curve(y_true[:, i], y_pred[:, i])
-            # TODO GIGA FIX ADD valore di AUPRC
-            precision_curve.append(precision_i)
-            recall_curve.append(recall_i)
+            precision_i, recall_i, thresholds = precision_recall_curve(y_true[:, i], y_score[:, i])  # GIGAFIX
+            ap = average_precision_score(y_true[:, i], y_score[:, i])
+            fig = plt.figure()
+            plt.plot(recall_i, precision_i, label='AP = {:.3f}'.format(ap))
+            plt.xlabel('Recall')
+            plt.ylabel('Precision')
+            plt.title('Precision-Recall Curve for Class ' + str(i))
+            plt.legend(loc="lower left")
+            self.writer.add_figure(val_test + " Precision-Recall Curve/Curve for Class " + str(i), fig, epoch)
 
         if self.writer is not None:
-            self.writer.add_scalar("val/Accuracy", accuracy, epoch)
-            self.writer.add_scalar("val/F1-macro score", f1_macro, epoch)
-            self.writer.add_scalar("val/F1-weighted score", f1_weighted, epoch)
-            self.writer.add_scalar("val/AUROC-macro", auroc_macro, epoch)
-            self.writer.add_scalar("val/AUROC-weighted", auroc_weighted, epoch)
+            self.writer.add_scalar(val_test + "/Accuracy", accuracy, epoch)
+            self.writer.add_scalar(val_test + "/F1-macro score", f1_macro, epoch)
+            self.writer.add_scalar(val_test + "/F1-weighted score", f1_weighted, epoch)
+            self.writer.add_scalar(val_test + "/AUROC-macro", auroc_macro, epoch)
+            self.writer.add_scalar(val_test + "/AUROC-weighted", auroc_weighted, epoch)
 
-            tmp_f1 = torch.zeros(1, 5)
-            tmp_auroc = torch.zeros(1, 5)
-            for i in range(5):
-                tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])
-                tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_score[:, i])
-
-            self.val_f1_heat_map = torch.cat([self.val_f1_heat_map, tmp_f1], dim=0)
-            self.val_auroc_heat_map = torch.cat([self.val_auroc_heat_map, tmp_auroc], dim=0)
-
-            if epoch == epochs and (mode == "joint" or mode == "zero" or mode == "data-inc"):
-                self.val_f1_heat_map = numpy.array(self.val_f1_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.val_f1_heat_map, [i for i in range(1, epochs + 1)],
-                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure('val/joint train/F1 score Heatmap', fig)
-
-                self.val_auroc_heat_map = numpy.array(self.val_auroc_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.val_auroc_heat_map, [i for i in range(1, epochs + 1)],
-                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure('val/joint train/AUROC score Heatmap', fig)
-
-            if epoch == 5 and (mode == "class-pos-neg" or mode == "class-pos"):
-                self.val_f1_heat_map = numpy.array(self.val_f1_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.val_f1_heat_map, [self.class_names[i] for i in tasks_order],
-                                   [self.class_names[i] for i in tasks_order], ax=ax,
-                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure('val/class-pos-neg incremental/F1 score Heatmap', fig)
-
-                self.val_auroc_heat_map = numpy.array(self.val_auroc_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.val_auroc_heat_map, [self.class_names[i] for i in tasks_order],
-                                   [self.class_names[i] for i in tasks_order], ax=ax,
-                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure('val/class-pos-neg incremental/AUROC score Heatmap', fig)
+            if val_test == "val":
+                self.val_f1_heat_map, self.val_auroc_heat_map = self._aux_evaluate_model(y_true, y_pred, y_score, mode,
+                                                                                         epoch, val_test, epochs,
+                                                                                         tasks_order,
+                                                                                         self.val_f1_heat_map,
+                                                                                         self.val_auroc_heat_map)
+            elif val_test == "test":
+                self.test_f1_heat_map, self.test_auroc_heat_map = self._aux_evaluate_model(y_true, y_pred, y_score,
+                                                                                           mode, epoch, val_test,
+                                                                                           epochs, tasks_order,
+                                                                                           self.test_f1_heat_map,
+                                                                                           self.test_auroc_heat_map)
+            else:
+                raise Exception
 
             x = [1, 2, 3, 4, 5]
             acc_y = []
             prec_y = []
             rec_y = []
             for i in range(5):
-                acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))
-                prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))
-                rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))
-            self.my_scatter_plt(x_axis=x, y_axis=acc_y, metric="Accuracy", epoch=epoch, mode="val")
-            self.my_scatter_plt(x_axis=x, y_axis=prec_y, metric="Precision", epoch=epoch, mode="val")
-            self.my_scatter_plt(x_axis=x, y_axis=rec_y, metric="Recall", epoch=epoch, mode="val")
+                acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))  # OK
+                prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))  # OK
+                rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))  # OK
+            self.my_scatter_plt(x_axis=x, y_axis=acc_y, metric="Accuracy", epoch=epoch, mode=val_test)
+            self.my_scatter_plt(x_axis=x, y_axis=prec_y, metric="Precision", epoch=epoch, mode=val_test)
+            self.my_scatter_plt(x_axis=x, y_axis=rec_y, metric="Recall", epoch=epoch, mode=val_test)
 
-            for i in range(5):
-                fig = plt.figure()
-                plt.plot(recall_curve[i], precision_curve[i], label='Precision-Recall curve')
-                plt.xlabel('Recall')
-                plt.ylabel('Precision')
-                plt.title('Precision-Recall Curve for Class ' + str(i))
-                plt.legend(loc="lower left")
-                self.writer.add_figure('val Precision-Recall Curve/Curve for Class ' + str(i), fig, epoch)
-            for i in range(5):
-                fig = plt.figure()
-                plt.plot(fpr_list[i], tpr_list[i])
-                plt.xlabel('False Positive Rate')
-                plt.ylabel('True Positive Rate')
-                plt.title('ROC Curve for Class ' + str(i))
-                self.writer.add_figure('val ROC Curve/Curve for Class ' + str(i), fig, epoch)
+    @torch.no_grad()
+    def _aux_evaluate_model(self, y_true, y_pred, y_score, mode, epoch, val_test, epochs, tasks_order, F1_MAP,
+                            AUROC_MAP):
+        tmp_f1 = torch.zeros(1, 5)
+        tmp_auroc = torch.zeros(1, 5)
+        for i in range(5):
+            tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])  # OK
+            tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_score[:, i])  # TODO
+        F1_MAP = torch.cat([F1_MAP, tmp_f1], dim=0)
+        AUROC_MAP = torch.cat([AUROC_MAP, tmp_auroc], dim=0)
+        if epoch == epochs and (mode == "joint" or mode == "zero" or mode == "data-inc"):
+            F1_MAP = numpy.array(F1_MAP)
+            fig, ax = plt.subplots()
+            im, cbar = heatmap(F1_MAP, [i for i in range(1, epochs + 1)],
+                               [self.class_names[i] for i in range(0, 5)], ax=ax,
+                               cmap="YlGn", cbarlabel="F1 score", metric="F1")
+            texts = annotate_heatmap(im, valfmt="{x:.2f}")
+            fig.tight_layout()
+            # plt.show()
+            self.writer.add_figure(val_test + "/joint train/F1 score Heatmap", fig)
+
+            AUROC_MAP = numpy.array(AUROC_MAP)
+            fig, ax = plt.subplots()
+            im, cbar = heatmap(AUROC_MAP, [i for i in range(1, epochs + 1)],
+                               [self.class_names[i] for i in range(0, 5)], ax=ax,
+                               cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
+            texts = annotate_heatmap(im, valfmt="{x:.2f}")
+            fig.tight_layout()
+            # plt.show()
+            self.writer.add_figure(val_test + "/joint train/AUROC score Heatmap", fig)
+
+        if epoch == 5 and (mode == "class-pos-neg" or mode == "class-pos"):
+            F1_MAP = numpy.array(F1_MAP)
+            fig, ax = plt.subplots()
+            im, cbar = heatmap(F1_MAP, [self.class_names[i] for i in tasks_order],
+                               [self.class_names[i] for i in tasks_order], ax=ax,
+                               cmap="YlGn", cbarlabel="F1 score", metric="F1")
+            texts = annotate_heatmap(im, valfmt="{x:.2f}")
+            fig.tight_layout()
+            # plt.show()
+            self.writer.add_figure(val_test + "/" + mode + ' incremental/F1 score Heatmap', fig)
+
+            AUROC_MAP = numpy.array(AUROC_MAP)
+            fig, ax = plt.subplots()
+            im, cbar = heatmap(AUROC_MAP, [self.class_names[i] for i in tasks_order],
+                               [self.class_names[i] for i in tasks_order], ax=ax,
+                               cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
+            texts = annotate_heatmap(im, valfmt="{x:.2f}")
+            fig.tight_layout()
+            # plt.show()
+            self.writer.add_figure(val_test + "/" + mode + ' incremental/AUROC score Heatmap', fig)
+
+        return F1_MAP, AUROC_MAP
 
     @torch.no_grad()
     def test(self, test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None):
@@ -901,8 +958,10 @@ class Trainer:
                         # Calculate the similarities between the image and the positive and negative prompts
                         pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
                         neg_similarities = torch.matmul(new_embs, neg_prompt_embedding.T)
-                        tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
-                        # tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
+                        if not LOGIT_DIFF:
+                            tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
+                        if LOGIT_DIFF:
+                            tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
 
                         pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                         neg_similarities = neg_similarities.reshape(-1, 1)
@@ -923,8 +982,10 @@ class Trainer:
                         # pos_similarities = pos_similarities.reshape(-1, 1)  # da (batch, a (batch, 1)
                         predicted_labels[:, i] = torch.where(pos_similarities.cpu() > 0, torch.tensor(1),
                                                              torch.tensor(0))
-                        tmp_score[:, i] = (pos_similarities + 1) / 2
-                        # tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
+                        if not LOGIT_DIFF:
+                            tmp_score[:, i] = (pos_similarities + 1) / 2  # xxx
+                        if LOGIT_DIFF:
+                            tmp_score[:, i] = (pos_similarities - neg_similarities + 2) / 4  # xxx
 
                 # Convert the predicted labels to a numpy array
                 predicted_labels_np = predicted_labels.cpu().numpy()
@@ -939,117 +1000,7 @@ class Trainer:
         y_pred = np.concatenate(y_pred)
         y_score = np.concatenate(y_score)  # xxx
 
-        # Calculate the metrics
-        accuracy = accuracy_score(y_true, y_pred)  # OK
-        f1_macro = f1_score(y_true, y_pred, average="macro")  # OK
-        f1_weighted = f1_score(y_true, y_pred, average="weighted")  # OK
-        auroc_macro = roc_auc_score(y_true, y_score, average="macro", multi_class="ovr")  # TODO
-        auroc_weighted = roc_auc_score(y_true, y_score, average="weighted", multi_class="ovr")  # TODO
-        precision = precision_score(y_true, y_pred, average="weighted")  # OK
-        recall = recall_score(y_true, y_pred, average="weighted")  # OK
-
-        # Calculate precision-recall curve for each class
-        precision_curve = []
-        recall_curve = []
-
-        fpr_list = []
-        tpr_list = []
-        for i in range(5):
-            fpr, tpr, thresholds = roc_curve(y_true[:, i], y_score[:, i])  # GIGAFIX
-            fpr_list.append(fpr)
-            tpr_list.append(tpr)
-
-            precision_i, recall_i, thresholds = precision_recall_curve(y_true[:, i], y_score[:, i])  # GIGAFIX
-            # TODO GIGA FIX ADD valore di AUPRC
-            precision_curve.append(precision_i)
-            recall_curve.append(recall_i)
-
-        if self.writer is not None:
-            self.writer.add_scalar("test/Accuracy", accuracy, epoch)
-            self.writer.add_scalar("test/F1-macro score", f1_macro, epoch)
-            self.writer.add_scalar("test/F1-weighted score", f1_weighted, epoch)
-            self.writer.add_scalar("test/AUROC-macro", auroc_macro, epoch)
-            self.writer.add_scalar("test/AUROC-weighted", auroc_weighted, epoch)
-
-            tmp_f1 = torch.zeros(1, 5)
-            tmp_auroc = torch.zeros(1, 5)
-            for i in range(5):
-                tmp_f1[0, i] = f1_score(y_true[:, i], y_pred[:, i])  # OK
-                tmp_auroc[0, i] = roc_auc_score(y_true[:, i], y_score[:, i])  # TODO
-
-            self.test_f1_heat_map = torch.cat([self.test_f1_heat_map, tmp_f1], dim=0)
-            self.test_auroc_heat_map = torch.cat([self.test_auroc_heat_map, tmp_auroc], dim=0)
-
-            if epoch == epochs and (mode == "joint" or mode == "zero" or mode == "data-inc"):
-                self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.test_f1_heat_map, [i for i in range(1, epochs + 1)],
-                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure('test/joint train/F1 score Heatmap', fig)
-
-                self.test_auroc_heat_map = numpy.array(self.test_auroc_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.test_auroc_heat_map, [i for i in range(1, epochs + 1)],
-                                   [self.class_names[i] for i in range(0, 5)], ax=ax,
-                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure('test/joint train/AUROC score Heatmap', fig)
-
-            if epoch == 5 and (mode == "class-pos-neg" or mode == "class-pos"):
-                self.test_f1_heat_map = numpy.array(self.test_f1_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.test_f1_heat_map, [self.class_names[i] for i in tasks_order],
-                                   [self.class_names[i] for i in tasks_order], ax=ax,
-                                   cmap="YlGn", cbarlabel="F1 score", metric="F1")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure("test/" + mode + ' incremental/F1 score Heatmap', fig)
-
-                self.test_auroc_heat_map = numpy.array(self.test_auroc_heat_map)
-                fig, ax = plt.subplots()
-                im, cbar = heatmap(self.test_auroc_heat_map, [self.class_names[i] for i in tasks_order],
-                                   [self.class_names[i] for i in tasks_order], ax=ax,
-                                   cmap="YlGn", cbarlabel="AUROC score", metric="AUROC")
-                texts = annotate_heatmap(im, valfmt="{x:.2f}")
-                fig.tight_layout()
-                # plt.show()
-                self.writer.add_figure("test/" + mode + ' incremental/AUROC score Heatmap', fig)
-
-            x = [1, 2, 3, 4, 5]
-            acc_y = []
-            prec_y = []
-            rec_y = []
-            for i in range(5):
-                acc_y.append(accuracy_score(y_true[:, i], y_pred[:, i]))  # OK
-                prec_y.append(precision_score(y_true[:, i], y_pred[:, i]))  # OK
-                rec_y.append(recall_score(y_true[:, i], y_pred[:, i]))  # OK
-            self.my_scatter_plt(x_axis=x, y_axis=acc_y, metric="Accuracy", epoch=epoch, mode="test")
-            self.my_scatter_plt(x_axis=x, y_axis=prec_y, metric="Precision", epoch=epoch, mode="test")
-            self.my_scatter_plt(x_axis=x, y_axis=rec_y, metric="Recall", epoch=epoch, mode="test")
-
-            for i in range(5):
-                fig = plt.figure()
-                plt.plot(recall_curve[i], precision_curve[i], label='Precision-Recall curve')
-                plt.xlabel('Recall')
-                plt.ylabel('Precision')
-                plt.title('Precision-Recall Curve for Class ' + str(i))
-                plt.legend(loc="lower left")
-                self.writer.add_figure('test Precision-Recall Curve/Curve for Class ' + str(i), fig, epoch)
-            for i in range(5):
-                fig = plt.figure()
-                plt.plot(fpr_list[i], tpr_list[i])
-                plt.xlabel('False Positive Rate')
-                plt.ylabel('True Positive Rate')
-                plt.title('ROC Curve for Class ' + str(i))
-                self.writer.add_figure('test ROC Curve/Curve for Class ' + str(i), fig, epoch)
-
+        self.evaluate_model(y_true, y_pred, y_score, mode, epoch, "test", epochs, tasks_order)
 
         if self.loss_name != "bce-only-pp":
             self.plot_cosine_similarity_text_embs(epoch, epochs)
@@ -1494,18 +1445,6 @@ class Trainer:
                 # reset the updated weights to the old values
                 param1.data[mask] = param2.data[mask]
 
-        print()
-        print("number of resets:", self.n_reset.item(), "number of updates:", self.n_updated.item(),
-              "percentage resets",
-              self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()))
-        self.writer.add_scalar("monitor-resets/resets", self.n_reset.item(), iteration)
-        self.writer.add_scalar("monitor-resets/updates", self.n_updated.item(), iteration)
-        self.writer.add_scalar("monitor-resets/percentage resets",
-                               self.n_reset.item() / (self.n_reset.item() + self.n_updated.item()),
-                               iteration)
-        self.n_reset = 0
-        self.n_updated = 0
-
     @torch.no_grad()
     def profIncremental(self, epoch, epochs, actual_task, threshold):
         if IMAGE_MODEL:
@@ -1563,7 +1502,7 @@ class Trainer:
     def train_class_more_labels_incremental(self, train_loader, criterion, epoch, CONTINUAL_LEARNING=None,
                                             threshold=None,
                                             current_task=None,
-                                            last_batch=0):
+                                            last_batch=0, actual_task = None):
         # xxx ONE EPOCH TRAIN
         batch_idx = last_batch
         if IMAGE_MODEL:
@@ -1572,7 +1511,7 @@ class Trainer:
             self.text_adapter.train()
         for embs, labels in tqdm(train_loader,
                                  desc="Fine-tuning on task " + str(current_task) + ", Epoch " + str(epoch)):
-            if CONTINUAL_LEARNING == "myCL":
+            if CONTINUAL_LEARNING == "myCL" and actual_task > 1:
                 self.model_copy()
 
             self.optimizer.zero_grad()
@@ -1641,12 +1580,23 @@ class Trainer:
             self.optimizer.step()
 
             iteration = batch_idx
-            if CONTINUAL_LEARNING == "myCL":
+            if CONTINUAL_LEARNING == "myCL" and actual_task > 1:
                 self.myIncremental(threshold, iteration)
 
             if self.writer is not None:
                 self.writer.add_scalar('train/Loss', loss.item(), iteration)
+
+        if CONTINUAL_LEARNING == "myCL" and actual_task > 1:
+            self.myIncremental_save_log(iteration)
+
         return iteration
+
+    @torch.no_grad()
+    def save(self):
+        if IMAGE_MODEL:
+            torch.save(self.image_adapter, self.writer.log_dir + '/image_adapter.pt')
+        if TEXT_MODEL:
+            torch.save(self.text_adapter, self.writer.log_dir + '/text_adapter.pt')
 
 
 @torch.no_grad()

@@ -35,13 +35,12 @@ if __name__ == '__main__':
     print("running on:", device)
 
     batch_size = 6144  # 4096, 6144 8192, 8192 (val e test sono settati di default a 1024 per avere dei plot meno rumorosi)
-    lr = 0.001  # 0.001  # 0.1  # 0.0001, 1, 30
+    lr = 0.0001  # 0.1  # 0.001  # 0.001  # 0.1  # 0.0001, 1, 30
     epochs = 10  # 10
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
     xrays_position = "all"  # "all", "frontal", "lateral"
     loss_name = "standard"  # "standard", "opzione2" "opzione2variant", "bce"
-    MORE_LABELS = False
     n_tasks = 5
     tasks_order = [0, 1, 2, 3, 4]
 
@@ -49,8 +48,10 @@ if __name__ == '__main__':
     threshold = 0.01
     ratio = True
     adder = 0.001
-    threshold_scheduling = True
-    mode = "class-pos"  # "class-pos-neg" / "class-pos" / "class-pos-neg-LABELS"
+    threshold_scheduling = False
+
+    mode = "class-pos-neg"  # "class-pos-neg" / "class-pos"
+    MORE_LABELS = True
     writer, class_names, train_loader, val_loader, test_loader, prompts = Trainer.preprocessing_class_incremental(
         chex_competition, xrays_position, single_prompt, batch_size, lr,
         epochs, loss_name, mode, CONTINUAL_LEARNING, ratio,
@@ -70,20 +71,21 @@ if __name__ == '__main__':
                 threshold = threshold + adder
                 if threshold_scheduling and CONTINUAL_LEARNING is not None:
                     writer.add_scalar("monitor-resets/threshold-scheduling", threshold, count)
-                if CONTINUAL_LEARNING == "profCL":
+                if CONTINUAL_LEARNING == "profCL" and actual_task > 1:
                     trainer.model_copy()
                 if not MORE_LABELS:
                     last_batch = trainer.train_class_incremental(train_loader[actual_task - 1], criterion, epoch,
-                                                             CONTINUAL_LEARNING, threshold,
-                                                             tasks_order[actual_task - 1],
-                                                         last_batch)
-                else:
-                    last_batch = trainer.train_class_more_labels_incremental(train_loader[actual_task - 1], criterion, epoch,
                                                                  CONTINUAL_LEARNING, threshold,
                                                                  tasks_order[actual_task - 1],
-                                                                 last_batch)
+                                                                 last_batch, actual_task)
+                else:
+                    last_batch = trainer.train_class_more_labels_incremental(train_loader[actual_task - 1], criterion,
+                                                                             epoch,
+                                                                             CONTINUAL_LEARNING, threshold,
+                                                                             tasks_order[actual_task - 1],
+                                                                             last_batch, actual_task)
 
-                if CONTINUAL_LEARNING == "profCL":
+                if CONTINUAL_LEARNING == "profCL" and actual_task > 1:
                     trainer.profIncremental(epoch, epochs, actual_task, threshold)
             trainer.val(val_loader, criterion, actual_task, epochs, mode=mode, tasks_order=tasks_order)
             trainer.test(test_loader, criterion, actual_task, epochs, mode=mode, tasks_order=tasks_order)
@@ -91,4 +93,6 @@ if __name__ == '__main__':
         print(f"An exception occurred: {e}")
     finally:
         # Play a sound to notify the end of the execution
+        if epochs > 0:
+            trainer.save()
         playsound.playsound("mixkit-correct-answer-tone-2870.wav")

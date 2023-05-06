@@ -19,7 +19,7 @@ if __name__ == '__main__':
     print("running on:", device)
 
     batch_size = 6144  # 4096, 6144 8192, 8192 (val e test sono settati di default a 1024 per avere dei plot meno rumorosi)
-    lr = 0.0001  # 0.1  # 0.0001, 1, 30
+    lr = 0.0001  # 0.0001  # 0.1  # 0.0001, 1, 30
     epochs = 10  # 10
     single_prompt = False  # False-->multiple True-->single
     chex_competition = True  # True, False
@@ -62,7 +62,7 @@ if __name__ == '__main__':
                 print("**** joint-train ****")
         if epochs > 0:
             for epoch in range(1, epochs + 1):
-                trainer.train(train_loader, criterion, epoch, CONTINUAL_LEARNING, threshold)
+                trainer.train(train_loader, criterion, epoch, CONTINUAL_LEARNING, threshold, actual_task=epoch)
                 trainer.val(val_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
                 trainer.test(test_loader, criterion, epoch, epochs, mode="joint", tasks_order=None)
         else:
@@ -72,4 +72,6 @@ if __name__ == '__main__':
         print(f"An exception occurred: {e}")
     finally:
         # Play a sound to notify the end of the execution
+        if epochs > 0:
+            trainer.save()
         playsound.playsound("mixkit-correct-answer-tone-2870.wav")
