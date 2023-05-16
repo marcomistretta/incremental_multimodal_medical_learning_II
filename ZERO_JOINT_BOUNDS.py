@@ -1,6 +1,6 @@
 import numpy as np
-import torch
 import playsound
+import torch
 from torch import nn
 
 from Trainer import Trainer
@@ -9,7 +9,6 @@ from Trainer import Trainer
 seed_value = 27
 torch.manual_seed(seed_value)
 import random
-
 random.seed(seed_value)
 np.random.seed(seed_value)
 

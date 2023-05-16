@@ -1,40 +1,26 @@
 import copy
 import math
-import random
 import warnings
-
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from torch.nn import CosineSimilarity
-from torchmetrics.functional import pairwise_cosine_similarity
-# from sklearn.metrics.pairwise import cosine_similarity
-# from torchmetrics.functional import pairwise_cosine_similarity
-# from torch import cosine_similarity
-from torchvision.io import read_image
-from torchvision.utils import make_grid
-from health_multimodal.text import get_cxr_bert_inference
 
 import numpy
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 from matplotlib import pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score, \
     precision_recall_curve, roc_curve, average_precision_score
 from torch.utils.data import Dataset, DataLoader, RandomSampler, ConcatDataset, TensorDataset, Subset
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.utils import make_grid
-
+from torchmetrics.functional import pairwise_cosine_similarity
+from torchvision.io import read_image
 from tqdm import tqdm
 
 from DataRetrieval import basic_create_prompts, create_prompts
-
 from HeatMapPlotter import heatmap, annotate_heatmap
+from health_multimodal.text import get_cxr_bert_inference
 from models import myLinearModel, myMLP
-from io import BytesIO
-from PIL import Image
 
 # zero shot o SHARED true, IMAGE true TEXT true
 # oppure con SHARED false, IMAGE false e TEXT false
@@ -50,7 +36,7 @@ MAX_EMB = False
 NEW_PROMPTS = False
 
 TRAIN_LOGIT_DIFF = True  # False <--> only POS
-PRED_LOGIT_DIFF = False  # False <--> only POS
+PRED_LOGIT_DIFF = True  # False <--> only POS
 
 # UNDER_SAMPLE = False
 CHANGE_LABELS = False
@@ -318,6 +304,7 @@ class Trainer:
             w_path = w_path + "-PRED-logit-POS"
         # w_path = w_path + "-2-PROMPT-UGUALI-PER-TUTTI"
         # w_path = w_path + "-debug-2"
+        # w_path = w_path + "-CHEX-PROMPT"
         print("writer path:", w_path)
         writer = SummaryWriter(w_path)
         if True:
@@ -1101,7 +1088,7 @@ class Trainer:
 
         abbrev_color_dict = {abbrev: color for abbrev, color in zip(abbrevviations, tmp_colors)}
         legend_patches = [plt.Rectangle((0, 0), 1, 1, color=color) for color in abbrev_color_dict.values()]
-        tsne = TSNE(n_components=2, metric='cosine', init="pca", learning_rate="auto")
+        tsne = TSNE(n_components=2, metric='cosine', init="pca", learning_rate="auto", square_distances=True)
         fig = plt.figure()
 
         X_tsne = tsne.fit_transform(embeddings)
@@ -1158,9 +1145,9 @@ class Trainer:
         colors = [tmp_colors[int(l)] for l in labels]
 
         abbrev_color_dict = {abbrev: color for abbrev, color in zip(abbrevviations, tmp_colors)}
-        print(abbrev_color_dict)
+        # print(abbrev_color_dict)
         legend_patches = [plt.Rectangle((0, 0), 1, 1, color=color) for color in abbrev_color_dict.values()]
-        tsne = TSNE(n_components=2, metric='cosine', init="pca", learning_rate="auto")
+        tsne = TSNE(n_components=2, metric='cosine', init="pca", learning_rate="auto", square_distances=True)
         fig = plt.figure()
 
         X_tsne = tsne.fit_transform(embeddings)

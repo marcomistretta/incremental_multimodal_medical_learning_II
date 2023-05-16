@@ -209,7 +209,7 @@ def create_prompts(class_list, new_prompts=False, train_logit_diff=None):
                 "negative": [f"There is no {c}", f"No evidence of {c}",
                              f"No evidence of acute {c}", f"No signs of {c}"]
             }
-        # xxx ANIMALI
+        # # xxx ANIMALI
         # my_prompts[class_list[0]] = {
         #     "positive": ["Findings suggesting dog"],
         #     "negative": ["No evidence of dog"],

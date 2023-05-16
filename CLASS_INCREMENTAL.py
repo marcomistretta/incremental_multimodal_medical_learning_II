@@ -1,31 +1,14 @@
-'''
-Questo può essere diviso in quanti task mi pare...
-Il numero di task == numero di "epoche"
-Split senza intersezione e lasciando val e test invariati
-Qua posso provare tutte le loss che voglio
-
-'''
-import copy
-import playsound
 import numpy as np
+import playsound
 import torch
-import torch.nn.functional as F
-from matplotlib import pyplot as plt
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score, \
-    precision_recall_curve
-from torch import nn, optim
-from torch.optim.lr_scheduler import ExponentialLR
-from tqdm import tqdm
+from torch import nn
 
 from Trainer import Trainer
-from health_multimodal.text.utils import get_cxr_bert_inference
-from models import myLinearModel
 
 # SET REPRODUCIBILITY
 seed_value = 27
 torch.manual_seed(seed_value)
 import random
-
 random.seed(seed_value)
 np.random.seed(seed_value)
 

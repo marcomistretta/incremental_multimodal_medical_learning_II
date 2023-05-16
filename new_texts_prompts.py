@@ -95,7 +95,7 @@ CHEXPERT_CLASS_PROMPTS = {
 }
 
 
-def generate_chexpert_class_prompts(train_logit_diff=False, n = 10):
+def generate_chexpert_class_prompts(train_logit_diff=False, n=4):
     """Generate text prompts for each CheXpert classification task
     Parameters
     ----------
