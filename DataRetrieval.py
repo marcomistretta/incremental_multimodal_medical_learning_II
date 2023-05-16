@@ -73,7 +73,6 @@ class CustomDataset(Dataset):
         self.img_labels = pd.read_csv(annotations_file)
         self.img_dir = img_dir
         self.transform = transform
-        # self.dataset = dataset xxx ultima modifica
 
         self.file_extension = ""
         # self.label_names = ['Pleural Effusion', 'Pneumothorax', 'Atelectasis', 'Pneumonia', 'Consolidation']
@@ -91,7 +90,6 @@ class CustomDataset(Dataset):
         if self.transform:
             image = self.transform(image)
         # plotImage(image) todo fix
-        # if self.dataset == "chexpert": xxx ultima modifica
         label = torch.tensor(self.img_labels.loc[idx, self.label_names].values.astype(np.float32))
         # print(label)
 
@@ -150,7 +148,6 @@ class DataRetrieval:
         # self.sampler = torch.utils.data.Subset(self.dataset,
         #                                        range(int(len(self.dataset) * perc_dataset)))
 
-        # xxx shuffle false
         self.loader = torch.utils.data.DataLoader(dataset=self.dataset, sampler=None, batch_size=batch_size,
                                                   shuffle=False,
                                                   num_workers=num_workers, pin_memory=True, drop_last=False)
@@ -162,11 +159,10 @@ class DataRetrieval:
     #     color_distort = transforms.Compose([
     #         rnd_color_jitter, rnd_gray])
     #     return color_distort
-    # todo uncomment
     # def get_pretext_pipeline(self, size, s=0.5):
     #     augmentation = transforms.Compose([
     #         transforms.ToPILImage(),
-    #         transforms.Grayscale(num_output_channels=3), # todo uncooment
+    #         transforms.Grayscale(num_output_channels=3),
     #         transforms.Resize(size=size),
     #         transforms.CenterCrop(size),
     #         transforms.ToTensor()]
@@ -186,31 +182,59 @@ def get_bio_vil_pipeline(size):
 
 def basic_create_prompts(class_list):
     print("*** Basic Prompting ***")
-    prompts = {}
+    my_prompts = {}
     for c in class_list:
-        prompts[c] = {
+        # xxx SINGLE
+        my_prompts[c] = {
             "positive": [f"Findings suggesting {c}"],
             "negative": [f"No evidence of {c}"],
         }
-    return prompts
+        # xxx UGAULE PER TUTTI
+        # my_prompts[c] = {
+        #     "positive": [f"Findings suggesting disease"],
+        #     "negative": [f"No evidence of disease"],
+        # }
+    return my_prompts
 
 
-def create_prompts(class_list, new_prompts=False):
+def create_prompts(class_list, new_prompts=False, train_logit_diff=None):
     if not new_prompts:
         print("*** Multiple Prompting ***")
-        prompts = {}
+        my_prompts = {}
+        # xxx MULTIPLE
         for c in class_list:
-            prompts[c] = {
+            my_prompts[c] = {
                 "positive": [f"Findings consistent with {c}", f"Findings suggesting {c}",
                              f"This opacity can represent {c}", f"Findings are most compatible with {c}"],
                 "negative": [f"There is no {c}", f"No evidence of {c}",
                              f"No evidence of acute {c}", f"No signs of {c}"]
             }
-        return prompts
+        # xxx ANIMALI
+        # my_prompts[class_list[0]] = {
+        #     "positive": ["Findings suggesting dog"],
+        #     "negative": ["No evidence of dog"],
+        # }
+        # my_prompts[class_list[1]] = {
+        #     "positive": ["Findings suggesting cat"],
+        #     "negative": ["No evidence of cat"],
+        # }
+        # my_prompts[class_list[2]] = {
+        #     "positive": ["Findings suggesting cow"],
+        #     "negative": ["No evidence of cow"],
+        # }
+        # my_prompts[class_list[3]] = {
+        #     "positive": ["Findings suggesting sheep"],
+        #     "negative": ["No evidence of sheep"],
+        # }
+        # my_prompts[class_list[4]] = {
+        #     "positive": ["Findings suggesting turtle"],
+        #     "negative": ["No evidence of turtle"],
+        # }
+        return my_prompts
     else:
         print()
         print("--------------- NEW PROMPTS ---------------")
-        return generate_chexpert_class_prompts()
+        return generate_chexpert_class_prompts(train_logit_diff)
 
 
 if __name__ == '__main__':

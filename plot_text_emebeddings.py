@@ -31,7 +31,6 @@ import random
 
 random.seed(seed_value)
 np.random.seed(seed_value)
-# xxx
 
 from DataRetrieval import create_prompts, basic_create_prompts
 
@@ -93,7 +92,7 @@ if __name__ == '__main__':
 
     embeddings = torch.stack(embeddings).cpu()
 
-    # xxx perform PCA on the embeddings to reduce them to 2 dimensions
+    #  perform PCA on the embeddings to reduce them to 2 dimensions
     pca = PCA(n_components=2)
     reduced_embeddings = pca.fit_transform(embeddings)
     # plot the reduced embeddings
@@ -112,7 +111,7 @@ if __name__ == '__main__':
     plt.show()
 
 
-    # xxx perform t-SNE on the embeddings to reduce them to 2 dimensions
+    #  perform t-SNE on the embeddings to reduce them to 2 dimensions
     tsne = TSNE(n_components=2, metric="euclidean")
     reduced_embeddings = tsne.fit_transform(embeddings)
     # plot the reduced embeddings

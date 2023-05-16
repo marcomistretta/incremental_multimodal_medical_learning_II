@@ -13,7 +13,7 @@ from tqdm import tqdm
 from torch.utils.data import ConcatDataset
 from models import myLinearModel
 import torch.utils.tensorboard as tb
-# xxx SET REPRODUCIBILITY
+#  SET REPRODUCIBILITY
 # import torch
 # seed_value = 42
 # # set Python random seed

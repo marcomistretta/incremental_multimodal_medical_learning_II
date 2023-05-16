@@ -23,7 +23,7 @@ from Trainer import Trainer
 from health_multimodal.text.utils import get_cxr_bert_inference
 from models import myLinearModel
 
-# xxx SET REPRODUCIBILITY
+#  SET REPRODUCIBILITY
 # import torch
 # seed_value = 42
 # # set Python random seed
@@ -42,7 +42,6 @@ import random
 
 random.seed(seed_value)
 np.random.seed(seed_value)
-# xxx
 
 from DataRetrieval import create_prompts, basic_create_prompts
 
@@ -89,7 +88,7 @@ if __name__ == '__main__':
     else:
         prompts = basic_create_prompts(class_list)
 
-    cosine_similarity_heatmap = torch.zeros((10, 10))  # todo
+    cosine_similarity_heatmap = torch.zeros((10, 10))
 
     for i, label_name_i in enumerate(class_list):
         # print(i, label_name_i)

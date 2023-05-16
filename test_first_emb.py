@@ -15,7 +15,7 @@ from health_multimodal.image import get_biovil_resnet
 from health_multimodal.text.utils import get_cxr_bert_inference
 from models import myLinearModel
 
-# xxx SET REPRODUCIBILITY
+#  SET REPRODUCIBILITY
 # import torch
 # seed_value = 42
 # # set Python random seed
@@ -34,7 +34,6 @@ import random
 
 random.seed(seed_value)
 np.random.seed(seed_value)
-# xxx
 
 # train
 # img

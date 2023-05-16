@@ -95,7 +95,7 @@ CHEXPERT_CLASS_PROMPTS = {
 }
 
 
-def generate_chexpert_class_prompts(n: int = 5):
+def generate_chexpert_class_prompts(train_logit_diff=False, n = 10):
     """Generate text prompts for each CheXpert classification task
     Parameters
     ----------
@@ -106,7 +106,14 @@ def generate_chexpert_class_prompts(n: int = 5):
     class prompts : dict
         dictionary of class to prompts
     """
-
+    ONLY_POS = not train_logit_diff
+    print("/// medclip prompts ///")
+    if ONLY_POS:
+        print("/// only pos ///")
+    else:
+        print("/// pos and neg ///")
+    print("/// number of pos:", n, " ///")
+    OPZ = 1
     prompts = {}
     for k, v in CHEXPERT_CLASS_PROMPTS.items():
         cls_prompts = []
@@ -120,38 +127,65 @@ def generate_chexpert_class_prompts(n: int = 5):
                 for k2 in v[keys[2]]:
                     cls_prompts.append(f"{k0} {k1} {k2}")
 
-        prompts[k] = random.sample(cls_prompts, n)
+        if ONLY_POS:
+            prompts[k] = {"positive": random.sample(cls_prompts, n)}
+        else:
+            prompts[k] = random.sample(cls_prompts, n)
 
-    diseases = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
-    pos_neg_prompts = {}
-    pos_neg_prompts[diseases[0]] = {
-        "positive": prompts["Atelectasis"],
-        "negative": [f"There is no Atelectasis", "No evidence of Atelectasis",
-                     "No evidence of acute Atelectasis", "No signs of Atelectasis"]
-    }
+    if not ONLY_POS:
+        diseases = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
+        pos_neg_prompts = {}
 
-    pos_neg_prompts[diseases[1]] = {
-        "positive": prompts["Cardiomegaly"],
-        "negative": ["There is no Cardiomegaly", "No evidence of Cardiomegaly",
-                     "No evidence of acute Cardiomegaly", "No signs of Cardiomegaly"]
-    }
-
-    pos_neg_prompts[diseases[2]] = {
-        "positive": prompts["Consolidation"],
-        "negative": ["There is no Consolidation", "No evidence of Consolidation",
-                     "No evidence of acute Consolidation", "No signs of Consolidation"]
-    }
-
-    pos_neg_prompts[diseases[3]] = {
-        "positive": prompts["Edema"],
-        "negative": ["There is no Edema", "No evidence of Edema",
-                     "No evidence of acute Edema", "No signs of Edema"]
-    }
-
-    pos_neg_prompts[diseases[4]] = {
-        "positive": prompts["Pleural Effusion"],
-        "negative": ["There is no Pleural Effusion", "No evidence of Pleural Effusion",
-                     "No evidence of acute Pleural Effusion", "No signs of Pleural Effusion"]
-    }
-    return pos_neg_prompts
-    # return prompts
+        if OPZ == 1:
+            print("/// 4 neg ///")
+            pos_neg_prompts[diseases[0]] = {
+                "positive": prompts["Atelectasis"],
+                "negative": [f"There is no Atelectasis", "No evidence of Atelectasis",
+                             "No evidence of acute Atelectasis", "No signs of Atelectasis"]
+            }
+            pos_neg_prompts[diseases[1]] = {
+                "positive": prompts["Cardiomegaly"],
+                "negative": ["There is no Cardiomegaly", "No evidence of Cardiomegaly",
+                             "No evidence of acute Cardiomegaly", "No signs of Cardiomegaly"]
+            }
+            pos_neg_prompts[diseases[2]] = {
+                "positive": prompts["Consolidation"],
+                "negative": ["There is no Consolidation", "No evidence of Consolidation",
+                             "No evidence of acute Consolidation", "No signs of Consolidation"]
+            }
+            pos_neg_prompts[diseases[3]] = {
+                "positive": prompts["Edema"],
+                "negative": ["There is no Edema", "No evidence of Edema",
+                             "No evidence of acute Edema", "No signs of Edema"]
+            }
+            pos_neg_prompts[diseases[4]] = {
+                "positive": prompts["Pleural Effusion"],
+                "negative": ["There is no Pleural Effusion", "No evidence of Pleural Effusion",
+                             "No evidence of acute Pleural Effusion", "No signs of Pleural Effusion"]
+            }
+        elif OPZ == 2:
+            print("/// only one neg ///")
+            pos_neg_prompts[diseases[0]] = {
+                "positive": prompts["Atelectasis"],
+                "negative": ["There is no findings"]
+            }
+            pos_neg_prompts[diseases[1]] = {
+                "positive": prompts["Cardiomegaly"],
+                "negative": ["There is no findings"]
+            }
+            pos_neg_prompts[diseases[2]] = {
+                "positive": prompts["Consolidation"],
+                "negative": ["There is no findings"]
+            }
+            pos_neg_prompts[diseases[3]] = {
+                "positive": prompts["Edema"],
+                "negative": ["There is no findings"]
+            }
+            pos_neg_prompts[diseases[4]] = {
+                "positive": prompts["Pleural Effusion"],
+                "negative": ["There is no findings"]
+            }
+    if ONLY_POS:
+        return prompts
+    else:
+        return pos_neg_prompts

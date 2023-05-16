@@ -21,14 +21,13 @@ from Trainer import Trainer
 from health_multimodal.text.utils import get_cxr_bert_inference
 from models import myLinearModel
 
-# xxx SET REPRODUCIBILITY
+# SET REPRODUCIBILITY
 seed_value = 27
 torch.manual_seed(seed_value)
 import random
 
 random.seed(seed_value)
 np.random.seed(seed_value)
-# xxx
 
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -52,7 +51,7 @@ if __name__ == '__main__':
 
     mode = "class-pos-neg"  # "class-pos-neg" / "class-pos"
     MORE_LABELS = True
-    writer, class_names, train_loader, val_loader, test_loader, prompts = Trainer.preprocessing_class_incremental(
+    writer, class_names, train_loader, val_loader, test_loader, prompts, plot_tsne_array = Trainer.preprocessing_class_incremental(
         chex_competition, xrays_position, single_prompt, batch_size, lr,
         epochs, loss_name, mode, CONTINUAL_LEARNING, ratio,
         threshold, threshold_scheduling, adder, MORE_LABELS)
@@ -88,7 +87,7 @@ if __name__ == '__main__':
                 if CONTINUAL_LEARNING == "profCL" and actual_task > 1:
                     trainer.profIncremental(epoch, epochs, actual_task, threshold)
             trainer.val(val_loader, criterion, actual_task, epochs, mode=mode, tasks_order=tasks_order)
-            trainer.test(test_loader, criterion, actual_task, epochs, mode=mode, tasks_order=tasks_order)
+            trainer.test(test_loader, criterion, actual_task, epochs, mode=mode, tasks_order=tasks_order, plot_tsne_array=plot_tsne_array)
     except Exception as e:
         print(f"An exception occurred: {e}")
     finally:

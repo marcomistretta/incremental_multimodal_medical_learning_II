@@ -14,7 +14,7 @@ CHEXPERT_COMPETITION_TASKS = [
     "Pleural Effusion",
 ]
 
-# xxx SET REPRODUCIBILITY
+# SET REPRODUCIBILITY
 # import torch
 # seed_value = 42
 # # set Python random seed
@@ -112,17 +112,4 @@ if __name__ == '__main__':
             # print a message to indicate that the final checkpoint has been saved
             print(f"Saved final checkpoint: {checkpoint_filename}")
 
-    # create a data loader for the embeddings dataset
-    # xxx batch_size = 16
-    # xxx loader = data_utils.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    # xxx for embeddings, labels in loader:
-    '''
-    # Load the dataset from a file
-    dataset = torch.load("all_embeddings.pt")
-    # Create a torch loader from the dataset
-    loader = data_utils.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    # Iterate through the loader to get batches of embeddings
-    for embeddings_batch in loader:
-        # Do something with the embeddings batch
-        pass
-    '''
+

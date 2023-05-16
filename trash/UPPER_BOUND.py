@@ -32,7 +32,7 @@ if __name__ == '__main__':
         class_names = ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
     else:
         print("NO chex competition")
-        class_names = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]
+        # class_names = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]
         chex_str = ""
 
     train_dataset = torch.load("embeddingDataset\\train\\512-"+chex_str+"not-normalize\\embeddings_dataset_final.pt")

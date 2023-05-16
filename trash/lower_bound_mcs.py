@@ -14,7 +14,7 @@ from health_multimodal.image import get_biovil_resnet
 from health_multimodal.text.utils import get_cxr_bert, get_cxr_bert_inference
 
 if __name__ == '__main__':
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # todo swap with right device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  #  swap with right device
     print("running on:", device)
 
     resnet_path = "C:\\Users\\mistr\\OneDrive\\Desktop\\mcs_only_local\\hi-ml\\hi-ml-multimodal\\src\\biovil_image_resnet50_proj_size_128.pt"
@@ -34,8 +34,8 @@ if __name__ == '__main__':
     prompt_names = ["pleural effusion", "pneumothorax", "atelectasis", "pneumonia", "consolidation"]
     img_size = 512
     perc_dataset = 1
-    dataset = "real"  # "small" / "real" xxx se small o real
-    split = "test"  # "val" "test" "train" "val-test" xxx main cartella del writer
+    dataset = "real"  # "small" / "real"  se small o real
+    split = "test"  # "val" "test" "train" "val-test"  main cartella del writer
     batch_size = 2  # 8  / 224:16 320:8 512:2 768:1
 
     img_dir = "C:\\Users\\mistr\\OneDrive\\Desktop\\real-chexpert\\"
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     do_writer = True
     if do_writer:  # NO or mean
         ll = "mcs-"+str_basic+"-prompt-NO-maiusc"
-        additional_info = ""  # "-prompt-eng-mcs-with-mean"  # xxx pezzettino aggiuntivo in fondo
+        additional_info = ""  # "-prompt-eng-mcs-with-mean"  #  pezzettino aggiuntivo in fondo
         name_summary = str(
             "runs-fix/chex-" + str(dataset) + "/" + str(split) + "/" + str(img_size) + "-" + str(ll) + str(
                 additional_info))
