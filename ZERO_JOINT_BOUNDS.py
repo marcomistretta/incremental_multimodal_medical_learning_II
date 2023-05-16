@@ -1,5 +1,5 @@
 # TEST BRANCH
-
+# parte 2
 import numpy as np
 import playsound
 import torch
