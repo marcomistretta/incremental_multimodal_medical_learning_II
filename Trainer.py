@@ -40,14 +40,13 @@ from PIL import Image
 # oppure con SHARED false, IMAGE false e TEXT false
 SHARED = False  # True,  False # xxx shared true mette gli altri due a true <3
 # con shared false invece si può fare che ci pare
-IMAGE_MODEL = False  # True, False
-TEXT_MODEL = False  # True, False
+IMAGE_MODEL = True  # True, False
+TEXT_MODEL = True  # True, False
 MODEL_USED = "mlp"  # mlp, dense, "no-head"
 
 OPTIM = "adam"  # sgd
 
 MAX_EMB = False
-
 NEW_PROMPTS = False
 
 TRAIN_LOGIT_DIFF = True  # False <--> only POS
@@ -267,6 +266,7 @@ class Trainer:
         folder_name = "INTATA"
         folder_name = "NUOVI_RISULTATI/vera-ultima-sperimentazione-zero-and-joint"
         folder_name = "NUOVI_RISULTATI-2/zero-and-joint"
+        folder_name = "NUOVI_RISULTATI-3/zero-and-joint"
         if single_prompt:
             str_basic = "-single-prompt"
             prompts = basic_create_prompts(class_names)

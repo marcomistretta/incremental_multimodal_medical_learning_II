@@ -50,6 +50,6 @@ if __name__ == '__main__':
         # create a new ConcatDataset from the selected sub_datasets
         sub_dataset = ConcatDataset(sub_datasets)
 
-    torch.save(sub_dataset, "embeddingDataset\\test\\512-chex-not-normalize\\embeddings_dataset_final_new.pt")
+    torch.save(sub_dataset, "../embeddingDataset/test/512-chex-not-normalize/embeddings_dataset_final_new.pt")
     print(len(sub_dataset))
 

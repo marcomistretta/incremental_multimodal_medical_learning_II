@@ -35,4 +35,4 @@ if __name__ == '__main__':
 
     dataset = ConcatDataset([torch.load(f"embeddingDataset\\train\\512-chex-not-normalize-frontal\\embeddings_dataset_{i}.pt") for i in index_list])
 
-    torch.save(dataset, "embeddingDataset/train/512-chex-not-normalize-frontal/embeddings_dataset_final_old.pt")
+    torch.save(dataset, "../embeddingDataset/train/512-chex-not-normalize-frontal/embeddings_dataset_final_old.pt")
