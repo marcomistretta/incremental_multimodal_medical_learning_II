@@ -47,8 +47,8 @@
 #
 #     img_dir = "C:\\Users\\mistr\\OneDrive\\Desktop\\real-chexpert\\"
 #     labels_dir = "C:\\Users\\mistr\\OneDrive\\Desktop\\real-chexpert\\test_labels.csv"
-#     basic_prompts = False
-#     if basic_prompts:
+#     single_prompt = False
+#     if single_prompt:
 #         str_basic = "NO"
 #     else:
 #         str_basic = "mean"
@@ -64,13 +64,13 @@
 #                                     perc_dataset=perc_dataset, size=img_size, s=0, verbose=True, num_workers=4).loader
 #     y_true = []
 #     y_pred = []
-#     if basic_prompts:
+#     if single_prompt:
 #         prompts = basic_create_prompts(class_names)
 #     else:
 #         prompts = create_prompts(class_names)
 #
 #     print("img size:", img_size)
-#     print("single_prompts:", basic_prompts)
+#     print("single_prompts:", single_prompt)
 #     print("do_writer:", do_writer)
 #     with torch.no_grad():
 #         for images, labels in tqdm(chexpert_loader, desc="Evaluating Zero-shot on chexpert"):
@@ -99,13 +99,13 @@
 #                 # Encode the positive and negative prompts
 #                 pos_prompt_embedding = cxr_bert.get_embeddings_from_prompt(pos_prompt, normalize=False)
 #                 assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#                 if not basic_prompts:
+#                 if not single_prompt:
 #                     pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #                 pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(device)
 #
 #                 neg_prompt_embedding = cxr_bert.get_embeddings_from_prompt(neg_prompt, normalize=False)
 #                 assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#                 if not basic_prompts:
+#                 if not single_prompt:
 #                     neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #                 neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(device)
 #

@@ -34,7 +34,7 @@ if __name__ == '__main__':
     mode = "data-inc"
 
     writer, class_names, train_loader, val_loader, test_loader, prompts, plot_tsne_array = Trainer.preprocessing_data_incremental(
-        chex_competition, xrays_position, single_prompt, batch_size, lr,
+        chex_competition, xrays_position, batch_size, lr,
         parts, epochs, loss_name, mode, CONTINUAL_LEARNING, ratio,
         threshold, threshold_scheduling, adder)
 

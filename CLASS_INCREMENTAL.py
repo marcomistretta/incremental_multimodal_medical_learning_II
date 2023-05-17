@@ -35,7 +35,7 @@ if __name__ == '__main__':
     mode = "class-pos-neg"  # "class-pos-neg" / "class-pos"
     MORE_LABELS = True
     writer, class_names, train_loader, val_loader, test_loader, prompts, plot_tsne_array = Trainer.preprocessing_class_incremental(
-        chex_competition, xrays_position, single_prompt, batch_size, lr,
+        chex_competition, xrays_position, batch_size, lr,
         epochs, loss_name, mode, CONTINUAL_LEARNING, ratio,
         threshold, threshold_scheduling, adder, MORE_LABELS)
 

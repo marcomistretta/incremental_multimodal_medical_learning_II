@@ -106,6 +106,8 @@ def generate_chexpert_class_prompts(train_logit_diff=False, n=4):
     class prompts : dict
         dictionary of class to prompts
     """
+    if n != 1 and n != 4:
+        raise ValueError("n must be 1 or 4")
     ONLY_POS = not train_logit_diff
     print("/// medclip prompts ///")
     if ONLY_POS:
@@ -128,7 +130,18 @@ def generate_chexpert_class_prompts(train_logit_diff=False, n=4):
                     cls_prompts.append(f"{k0} {k1} {k2}")
 
         if ONLY_POS:
-            prompts[k] = {"positive": random.sample(cls_prompts, n)}
+            if n == 1:
+                prompts[k] = {
+                    "positive": random.sample(cls_prompts, n),
+                    "negative": [f"No evidence of {k}"],
+                }
+
+            elif n == 4:
+                prompts[k] = {
+                    "positive": random.sample(cls_prompts, n),
+                    "negative": [f"There is no {c}", f"No evidence of {c}",
+                                 f"No evidence of acute {c}", f"No signs of {c}"],
+                }
         else:
             prompts[k] = random.sample(cls_prompts, n)
 

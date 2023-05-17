@@ -180,28 +180,77 @@ def get_bio_vil_pipeline(size):
     return augmentation
 
 
-def basic_create_prompts(class_list):
+def get_prompts(single, class_list, opz):
+    if single:
+        print("*** SINGLE PROMPTS ***")
+        return _single_prompts(class_list, opz)
+    else:
+        print("*** MULTIPLE PROMPTS ***")
+        return _multiple_prompts(class_list, opz)
+
+
+def _single_prompts(class_list, opz):
     print("*** Basic Prompting ***")
     my_prompts = {}
-    for c in class_list:
+    if opz == 0:
         # xxx SINGLE
-        my_prompts[c] = {
-            "positive": [f"Findings suggesting {c}"],
-            "negative": [f"No evidence of {c}"],
+        print()
+        print("--------------- SINGLE UN POS e UN NEG per malattia ---------------")
+        for c in class_list:
+            my_prompts[c] = {
+                "positive": [f"Findings suggesting {c}"],
+                "negative": [f"No evidence of {c}"],
+            }
+    elif opz == 1:
+        # xxx UGUALE PER TUTTI
+        print()
+        print("--------------- SINGLE, c'è qualcosa / non c'è qualcosa ---------------")
+        for c in class_list:
+            my_prompts[c] = {
+                "positive": [f"Findings suggesting disease"],
+                "negative": [f"No evidence of disease"],
+            }
+    elif opz == 2:
+        # xxx ANIMALI
+        print()
+        print("--------------- SINGLE ANIMALE ---------------")
+        my_prompts[class_list[0]] = {
+            "positive": ["Findings suggesting dog"],
+            "negative": ["No evidence of dog"],
         }
-        # xxx UGAULE PER TUTTI
-        # my_prompts[c] = {
-        #     "positive": [f"Findings suggesting disease"],
-        #     "negative": [f"No evidence of disease"],
-        # }
+        my_prompts[class_list[1]] = {
+            "positive": ["Findings suggesting cat"],
+            "negative": ["No evidence of cat"],
+        }
+        my_prompts[class_list[2]] = {
+            "positive": ["Findings suggesting cow"],
+            "negative": ["No evidence of cow"],
+        }
+        my_prompts[class_list[3]] = {
+            "positive": ["Findings suggesting sheep"],
+            "negative": ["No evidence of sheep"],
+        }
+        my_prompts[class_list[4]] = {
+            "positive": ["Findings suggesting turtle"],
+            "negative": ["No evidence of turtle"],
+        }
+    elif opz == 3:
+        # xxx SINGLE CHEX MEDCLIP PROMPTS
+        print()
+        print("--------------- SINGLE CHEX MEDCLIP PROMPTS ---------------")
+        my_prompts = generate_chexpert_class_prompts(train_logit_diff=False, n=1)
+    else:
+        raise Exception("opz not found")
     return my_prompts
 
 
-def create_prompts(class_list, new_prompts=False, train_logit_diff=None):
-    if not new_prompts:
-        print("*** Multiple Prompting ***")
-        my_prompts = {}
+def _multiple_prompts(class_list, opz):
+    print("*** Multiple Prompting ***")
+    my_prompts = {}
+    if opz == 0:
         # xxx MULTIPLE
+        print()
+        print("--------------- MULTIPLE VANILLA ---------------")
         for c in class_list:
             my_prompts[c] = {
                 "positive": [f"Findings consistent with {c}", f"Findings suggesting {c}",
@@ -209,35 +258,24 @@ def create_prompts(class_list, new_prompts=False, train_logit_diff=None):
                 "negative": [f"There is no {c}", f"No evidence of {c}",
                              f"No evidence of acute {c}", f"No signs of {c}"]
             }
-        # # xxx ANIMALI
-        # my_prompts[class_list[0]] = {
-        #     "positive": ["Findings suggesting dog"],
-        #     "negative": ["No evidence of dog"],
-        # }
-        # my_prompts[class_list[1]] = {
-        #     "positive": ["Findings suggesting cat"],
-        #     "negative": ["No evidence of cat"],
-        # }
-        # my_prompts[class_list[2]] = {
-        #     "positive": ["Findings suggesting cow"],
-        #     "negative": ["No evidence of cow"],
-        # }
-        # my_prompts[class_list[3]] = {
-        #     "positive": ["Findings suggesting sheep"],
-        #     "negative": ["No evidence of sheep"],
-        # }
-        # my_prompts[class_list[4]] = {
-        #     "positive": ["Findings suggesting turtle"],
-        #     "negative": ["No evidence of turtle"],
-        # }
-        return my_prompts
-    else:
+    # todo opz 1
+    elif opz == 2:
+        # xxx MULTIPLE ANIMALE
         print()
-        print("--------------- NEW PROMPTS ---------------")
-        return generate_chexpert_class_prompts(train_logit_diff)
-
-
-if __name__ == '__main__':
-    class_list = ["Pleural Effusion", "Pneumothorax", "Atelectasis", "Pneumonia", "Consolidation"]
-    prompts = create_prompts(class_list)
-    print(prompts)
+        print("--------------- 4 per ANIMALE ---------------")
+        animals = ["dog", "cat", "cow", "sheep", "turtle"]
+        for idx, c in enumerate(class_list):
+            my_prompts[c] = {
+                "positive": [f"Findings consistent with {animals[idx]}", f"Findings suggesting {animals[idx]}",
+                             f"This opacity can represent {animals[idx]}", f"Findings are most compatible with {animals[idx]}"],
+                "negative": [f"There is no {animals[idx]}", f"No evidence of {animals[idx]}",
+                             f"No evidence of acute {animals[idx]}", f"No signs of {animals[idx]}"]
+            }
+    elif opz == 3:
+        # xxx MULIPLE CHEX MEDCLIP PROMPTS
+        print()
+        print("--------------- CHEX MEDCLIP PROMPTS ---------------")
+        my_prompts = generate_chexpert_class_prompts(train_logit_diff=True, n=4)
+    else:
+        raise Exception("opz:", opz, "not found")
+    return my_prompts

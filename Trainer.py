@@ -17,7 +17,7 @@ from torchmetrics.functional import pairwise_cosine_similarity
 from torchvision.io import read_image
 from tqdm import tqdm
 
-from DataRetrieval import basic_create_prompts, create_prompts
+from DataRetrieval import get_prompts
 from HeatMapPlotter import heatmap, annotate_heatmap
 from health_multimodal.text import get_cxr_bert_inference
 from models import myLinearModel, myMLP
@@ -32,14 +32,24 @@ MODEL_USED = "mlp"  # mlp, dense, "no-head"
 
 OPTIM = "adam"  # sgd
 
+TRAIN_LOGIT_DIFF = True  # True <--> POS - NEG
+PRED_LOGIT_DIFF = False  # False <--> only POS
+
+SINGLE_PROMPT = False  # True, False
 MAX_EMB = False
-NEW_PROMPTS = False
+OPZ_PROMPTS = 0
 
-TRAIN_LOGIT_DIFF = True  # False <--> only POS
-PRED_LOGIT_DIFF = True  # False <--> only POS
 
-# UNDER_SAMPLE = False
-CHANGE_LABELS = False
+# S.0: SINGLE UN POS e UN NEG per malattia (vanilla)
+# S.1: SINGLE, c'è qualcosa / non c'è qualcosa
+# S.2: SINGLE ANIMALE
+# M.3: SINGLE, medclip chexpert
+
+
+# M.0: MULTIPLE 4 POS e 4 NEG per mallatia (vanilla)
+# todo
+# M.2: MULTIPLE, ANIMALE
+# M.3: MULTIPLE, medclip chexpert
 
 
 def filter_dataloader_multiclass(dataloader):
@@ -67,6 +77,7 @@ def filter_dataloader_multiclass(dataloader):
                                      shuffle=True, num_workers=4, pin_memory=True, drop_last=False)
     return filtered_dataloader
 
+
 def filter_dataloader_sani_e_malati(dataloader):
     filtered_dataset = []
     counts = [0, 0]
@@ -83,6 +94,7 @@ def filter_dataloader_sani_e_malati(dataloader):
                                      shuffle=True, num_workers=4, pin_memory=True, drop_last=False)
     return filtered_dataloader
 
+
 class Trainer:
     def __init__(self, single_prompt, prompts, class_names, loss_name, lr, device, writer):
         self.pos_mean_counter = 0
@@ -98,10 +110,8 @@ class Trainer:
         self.device = device
         self.writer = writer
         self.loss_name = loss_name
-        self.change_labels = CHANGE_LABELS
-        if self.change_labels:
-            print("*** Watch out! Changing labels is enabled! ***")
-        self.basic_prompts = single_prompt
+
+        self.single_prompt = single_prompt
         if single_prompt:
             print("Single prompt per class")
         else:
@@ -237,10 +247,11 @@ class Trainer:
         print("post plot tsne-multiclass loader", len(plot_tsne_loader_multiclass.dataset))
         print("post plot tsne-sani-malati loader", len(plot_tsne_loader_sani_malati.dataset))
 
-        return class_names, chex_str, train_loader, val_loader, test_loader, [plot_tsne_loader_multiclass, plot_tsne_loader_sani_malati]
+        return class_names, chex_str, train_loader, val_loader, test_loader, [plot_tsne_loader_multiclass,
+                                                                              plot_tsne_loader_sani_malati]
 
     @staticmethod
-    def preprocessing(chex_competition, xrays_position, single_prompt, batch_size, lr, epochs, loss_name):
+    def preprocessing(chex_competition, xrays_position, batch_size, lr, epochs, loss_name):
 
         class_names, chex_str, train_loader, val_loader, test_loader, plot_tsne_array = Trainer._preprocessing(
             chex_competition,
@@ -253,14 +264,14 @@ class Trainer:
         folder_name = "NUOVI_RISULTATI/vera-ultima-sperimentazione-zero-and-joint"
         folder_name = "NUOVI_RISULTATI-2/zero-and-joint"
         folder_name = "NUOVI_RISULTATI-3/zero-and-joint"
-        if single_prompt:
-            str_basic = "-single-prompt"
-            prompts = basic_create_prompts(class_names)
+        folder_name = "PROJECT-WORK-3/zero-and-joint"
+        if SINGLE_PROMPT:
+            str_single_prompt = "-single-prompt"
         else:
-            str_basic = "-mean-prompt"
+            str_single_prompt = "-mean-prompt"
             if MAX_EMB:
-                str_basic = "-MAX-prompt"
-            prompts = create_prompts(class_names, NEW_PROMPTS, TRAIN_LOGIT_DIFF)
+                str_single_prompt = "-MAX-prompt"
+        prompts = get_prompts(SINGLE_PROMPT, class_names, OPZ_PROMPTS)
         if epochs > 0:
             suffix = "-" + MODEL_USED
             if SHARED:
@@ -276,7 +287,7 @@ class Trainer:
             w_path = "./" + folder_name + "/joint-train-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix
+                epochs) + chex_str + str_single_prompt + "-" + str(xrays_position) + suffix
         if epochs == 0:
             if SHARED and IMAGE_MODEL and TEXT_MODEL:
                 suffix = "-SHARED-adapter-" + MODEL_USED
@@ -285,12 +296,11 @@ class Trainer:
             else:
                 raise Exception
             print("Attenzione! Zero-shot evaluation!")
-            w_path = "./" + folder_name + "/zero-shot-model" + chex_str + str_basic + "-" + str(
+            w_path = "./" + folder_name + "/zero-shot-model" + chex_str + str_single_prompt + "-" + str(
                 xrays_position) + suffix
         # w_path = "./joint-training/rapid_check"
         # w_path = w_path + "-There-is-There-is-no"
-        if NEW_PROMPTS:
-            w_path = w_path + "-NEW-PROMPTS"
+        w_path = w_path + "-OPZ-"+str(OPZ_PROMPTS)
         # if UNDER_SAMPLE:
         #     w_path = w_path + "-UNDER-SAMPLE"
 
@@ -304,18 +314,21 @@ class Trainer:
             w_path = w_path + "-PRED-logit-POS"
         # w_path = w_path + "-2-PROMPT-UGUALI-PER-TUTTI"
         # w_path = w_path + "-debug-2"
-        # w_path = w_path + "-CHEX-PROMPT"
-        print("writer path:", w_path)
-        writer = SummaryWriter(w_path)
+        # w_path = w_path + "-debug"
+
         if True:
             for c in class_names:
-                print(c, "positive", prompts[c]["positive"])
-                print(c, "negative", prompts[c]["negative"])
-
+                print(c, "positive", "len", len(prompts[c]["positive"]), "type", type(prompts[c]["positive"]),
+                      "subtype", type(prompts[c]["positive"][0]), prompts[c]["positive"])
+                print(c, "negative", "len", len(prompts[c]["negative"]), "type", type(prompts[c]["negative"]),
+                      "subtype", type(prompts[c]["negative"][0]), prompts[c]["negative"])
+                print()
+        print("writer path:", w_path)
+        writer = SummaryWriter(w_path)
         return writer, class_names, train_loader, val_loader, test_loader, prompts, plot_tsne_array
 
     @staticmethod
-    def preprocessing_class_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+    def preprocessing_class_incremental(chex_competition, xrays_position, batch_size, lr,
                                         epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
                                         threshold=None, threshold_scheduling=False, adder=0.01, MORE_LABELS=False):
 
@@ -367,14 +380,13 @@ class Trainer:
         else:
             mode = "fine-tuning-" + mode
         # mode = "fine-tuning-" + mode
-        if basic_prompts:
-            str_basic = "-single-prompt"
-            prompts = basic_create_prompts(class_names)
+        if SINGLE_PROMPT:
+            str_single_prompt = "-single-prompt"
         else:
-            str_basic = "-mean-prompt"
+            str_single_prompt = "-mean-prompt"
             if MAX_EMB:
-                str_basic = "-MAX-prompt"
-            prompts = create_prompts(class_names, NEW_PROMPTS, TRAIN_LOGIT_DIFF)
+                str_single_prompt = "-MAX-prompt"
+        prompts = get_prompts(SINGLE_PROMPT, class_names, OPZ_PROMPTS)
         if epochs > 0:
             suffix = "-" + MODEL_USED
             if SHARED:
@@ -389,11 +401,11 @@ class Trainer:
             # w_path = "./only-" + mode + "/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
             #     lr) + "-bs" + str(
             #     batch_size) + "-ep" + str(
-            #     epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
+            #     epochs) + chex_str + str_single_prompt + "-" + str(xrays_position) + suffix + cl_str
             w_path = folder_name + "/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
-                epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str + thre_str
+                epochs) + chex_str + str_single_prompt + "-" + str(xrays_position) + suffix + cl_str + thre_str
 
         if epochs == 0:
             raise Exception
@@ -401,8 +413,7 @@ class Trainer:
         # w_path = w_path + "-DEBUG"
         if MORE_LABELS:
             w_path += "-MORE-LABELS"
-        if NEW_PROMPTS:
-            w_path = w_path + "-NEW-PROMPTS"
+        w_path = w_path + "-OPZ-"+str(OPZ_PROMPTS)
         # if UNDER_SAMPLE:
         #     w_path = w_path + "-UNDER-SAMPLE"
 
@@ -422,7 +433,7 @@ class Trainer:
         return writer, class_names, train_loader, val_loader, test_loader, prompts, plot_tsne_array
 
     @staticmethod  # xxx prep for data-incremental
-    def preprocessing_data_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+    def preprocessing_data_incremental(chex_competition, xrays_position, batch_size, lr,
                                        parts, epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
                                        threshold=None, threshold_scheduling=False, adder=0.01):
 
@@ -455,14 +466,13 @@ class Trainer:
         else:
             mode = "fine-tuning-" + mode
         # mode = "fine-tuning-" + mode
-        if basic_prompts:
-            str_basic = "-single-prompt"
-            prompts = basic_create_prompts(class_names)
+        if SINGLE_PROMPT:
+            str_single_prompt = "-single-prompt"
         else:
-            str_basic = "-mean-prompt"
+            str_single_prompt = "-mean-prompt"
             if MAX_EMB:
-                str_basic = "-MAX-prompt"
-            prompts = create_prompts(class_names, NEW_PROMPTS, TRAIN_LOGIT_DIFF)
+                str_single_prompt = "-MAX-prompt"
+        prompts = get_prompts(SINGLE_PROMPT, class_names, OPZ_PROMPTS)
         if epochs > 0:
             suffix = "-" + MODEL_USED
             if SHARED:
@@ -477,20 +487,19 @@ class Trainer:
             # w_path = "./only-" + mode + "/" + mode + "-loss-" + str(loss_name) + "-opt-" + OPTIM + "-lr-" + str(
             #     lr) + "-bs" + str(
             #     batch_size) + "-ep" + str(
-            #     epochs) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str
+            #     epochs) + chex_str + str_single_prompt + "-" + str(xrays_position) + suffix + cl_str
             w_path = folder_name + "/" + mode + "-loss-" + str(
                 loss_name) + "-opt-" + OPTIM + "-lr-" + str(
                 lr) + "-bs" + str(
                 batch_size) + "-ep" + str(
                 epochs) + "-parts" + str(
-                parts) + chex_str + str_basic + "-" + str(xrays_position) + suffix + cl_str + thre_str
+                parts) + chex_str + str_single_prompt + "-" + str(xrays_position) + suffix + cl_str + thre_str
 
         if epochs == 0:
             raise Exception
         # w_path = "./joint-training/rapid_check"
         # w_path = w_path + "-DEBUG"
-        if NEW_PROMPTS:
-            w_path = w_path + "-NEW-PROMPTS"
+        w_path = w_path + "-OPZ-"+str(OPZ_PROMPTS)
         # if UNDER_SAMPLE:
         #     w_path = w_path + "-UNDER-SAMPLE"
 
@@ -522,6 +531,7 @@ class Trainer:
         else:
             str_part = " part-" + str(part)
         for embs, labels in tqdm(train_loader, desc="Fine-tuning on chexpert," + str_part + " Epoch " + str(epoch)):
+
             if CONTINUAL_LEARNING == "myCL":
                 if actual_task > 1:
                     self.model_copy()
@@ -563,8 +573,8 @@ class Trainer:
                 else:
                     logits[:, i] = pos_similarities.flatten()
 
-            if self.change_labels:
-                labels = change_values(labels)
+            # if self.change_labels:
+            #     labels = change_values(labels)
 
             loss = criterion(logits, labels)
             loss.backward()
@@ -648,8 +658,8 @@ class Trainer:
                 logits = pos_similarities.flatten()
             # Compute loss and backpropagate
             # loss figa con labels -2, 2 che ipoteticamnete spara pos a 1 neg a -1 e viceversa
-            if self.change_labels:
-                labels = change_values(labels)
+            # if self.change_labels:
+            #     labels = change_values(labels)
             # loss = criterion(predicted_labels, labels)
 
             loss = criterion(logits, labels)
@@ -721,8 +731,8 @@ class Trainer:
                     logits[:, i] = pos_similarities.flatten()
                 # Compute loss and backpropagate
             # loss figa con labels -2, 2 che ipoteticamnete spara pos a 1 neg a -1 e viceversa
-            if self.change_labels:
-                labels = change_values(labels)
+            # if self.change_labels:
+            #     labels = change_values(labels)
             # loss = criterion(predicted_labels, labels)
 
             loss = criterion(logits, labels)
@@ -824,9 +834,9 @@ class Trainer:
                                                           dim=1)
 
                 # Compute loss and backpropagate
-                if self.change_labels:
-                    tmp = labels
-                    labels = change_values(labels)
+                # if self.change_labels:
+                #     tmp = labels
+                #     labels = change_values(labels)
 
                 loss = criterion(logits, labels)
 
@@ -838,10 +848,10 @@ class Trainer:
                 predicted_labels_np = predicted_labels.cpu().numpy()
 
                 # Append the true and predicted labels to the lists
-                if not self.change_labels:
-                    y_true.append(labels.cpu().numpy())
-                if self.change_labels:
-                    y_true.append(tmp.cpu().numpy())
+                # if not self.change_labels:
+                y_true.append(labels.cpu().numpy())
+                # if self.change_labels:
+                #     y_true.append(tmp.cpu().numpy())
                 y_pred.append(predicted_labels_np)
                 y_score.append(tmp_score.cpu().numpy())
 
@@ -1141,7 +1151,7 @@ class Trainer:
 
         # labels[labels == [0.0, 0.0, 0.0, 0.0, 0.0]] = 0
         # labels[labels == [1.0, 1.0, 1.0, 1.0, 1.0]] = 1
-        labels = torch.sum(labels, dim=1)/5
+        labels = torch.sum(labels, dim=1) / 5
         colors = [tmp_colors[int(l)] for l in labels]
 
         abbrev_color_dict = {abbrev: color for abbrev, color in zip(abbrevviations, tmp_colors)}
@@ -1435,7 +1445,7 @@ class Trainer:
 
                 cosine_similarity_heatmap[i, j] = pos_similarities
 
-        if self.basic_prompts:
+        if self.single_prompt:
             str_prompts = "-single-prompt"
         else:
             str_prompts = "-multiple-prompts"
@@ -1517,7 +1527,7 @@ class Trainer:
                 #     neg_similarities_right, inds = torch.max(neg_similarities_right, dim=0)
                 cosine_similarity_heatmap[i * 2 + 1, j * 2 + 1] = neg_similarities_right
 
-        if self.basic_prompts:
+        if self.single_prompt:
             str_prompts = "-single-prompt"
         else:
             str_prompts = "-multiple-prompts"
@@ -1649,7 +1659,7 @@ class Trainer:
             if TEXT_MODEL:
                 pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
             assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-            if (not self.basic_prompts and not MAX_EMB) or to_plot:
+            if (not self.single_prompt and not MAX_EMB) or to_plot:
                 pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
             # pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=0, p=2).to(self.device)
             # pos_prompt_embedding = F.normalize(pos_prompt_embedding, dim=-1, p=2).to(self.device)
@@ -1659,7 +1669,7 @@ class Trainer:
             if TEXT_MODEL:
                 neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
             assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-            if (not self.basic_prompts and not MAX_EMB) or to_plot:
+            if (not self.single_prompt and not MAX_EMB) or to_plot:
                 neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
             # neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=0, p=2).to(self.device)
             # neg_prompt_embedding = F.normalize(neg_prompt_embedding, dim=-1, p=2).to(self.device)
@@ -1690,26 +1700,25 @@ class Trainer:
                                                self.neg_mean_counter)
             return res
 
-
-@torch.no_grad()
-def change_values(tensor):
-    """
-    Takes a 2D torch tensor of float32 with 0 and 1 values and changes 1 to 2 and 0 to -2.
-    Returns the modified tensor as a tensor of float32.
-    """
-    # Check if the input tensor is a 2D tensor
-    # todo check se funziona sia per 2d che per 1d
-    # if len(tensor.shape) != 2:
-    #     raise ValueError("Input tensor must be a 2D tensor.")
-
-    # Create a copy of the input tensor
-    new_tensor = tensor.clone()
-
-    # Replace 1 with 2 and 0 with -2
-    new_tensor[tensor == 1] = 1  # 2
-    new_tensor[tensor == 0] = -1  # -2
-
-    # Convert the tensor to float32
-    new_tensor = new_tensor.float()
-
-    return new_tensor.to(tensor.device)
+# @torch.no_grad()
+# def change_values(tensor):
+#     """
+#     Takes a 2D torch tensor of float32 with 0 and 1 values and changes 1 to 2 and 0 to -2.
+#     Returns the modified tensor as a tensor of float32.
+#     """
+#     # Check if the input tensor is a 2D tensor
+#     # todo check se funziona sia per 2d che per 1d
+#     # if len(tensor.shape) != 2:
+#     #     raise ValueError("Input tensor must be a 2D tensor.")
+#
+#     # Create a copy of the input tensor
+#     new_tensor = tensor.clone()
+#
+#     # Replace 1 with 2 and 0 with -2
+#     new_tensor[tensor == 1] = 1  # 2
+#     new_tensor[tensor == 0] = -1  # -2
+#
+#     # Convert the tensor to float32
+#     new_tensor = new_tensor.float()
+#
+#     return new_tensor.to(tensor.device)

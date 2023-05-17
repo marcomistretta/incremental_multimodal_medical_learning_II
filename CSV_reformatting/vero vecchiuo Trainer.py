@@ -37,7 +37,7 @@
 # PRED_LOGIT_DIFF = False
 # UNDER_SAMPLE = False
 # CHANGE_LABELS = False
-# NEW_PROMPTS = False
+# OPZ_PROMPTS = False
 #
 #
 # def filter_dataloader_multiclass(dataloader):
@@ -68,7 +68,7 @@
 #         self.change_labels = CHANGE_LABELS
 #         if self.change_labels:
 #             print("*** Watch out! Changing labels is enabled! ***")
-#         self.basic_prompts = single_prompt
+#         self.single_prompt = single_prompt
 #         if single_prompt:
 #             print("Single prompt per class")
 #         else:
@@ -221,7 +221,7 @@
 #             str_basic = "-mean-prompt"
 #             if MAX_EMB:
 #                 str_basic = "-MAX-prompt"
-#             prompts = create_prompts(class_names, NEW_PROMPTS)
+#             prompts = create_prompts(class_names, OPZ_PROMPTS)
 #         if epochs > 0:
 #             suffix = "-" + MODEL_USED
 #             if SHARED:
@@ -250,7 +250,7 @@
 #                 xrays_position) + suffix
 #         # w_path = "./joint-training/rapid_check"
 #         # w_path = w_path + "-DEBUG"
-#         if NEW_PROMPTS:
+#         if OPZ_PROMPTS:
 #             w_path = w_path + "-NEW-PROMPTS"
 #         if UNDER_SAMPLE:
 #             w_path = w_path + "-UNDER-SAMPLE"
@@ -263,7 +263,7 @@
 #         return writer, class_names, train_loader, val_loader, test_loader, prompts
 #
 #     @staticmethod
-#     def preprocessing_class_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+#     def preprocessing_class_incremental(chex_competition, xrays_position, single_prompt, batch_size, lr,
 #                                         epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
 #                                         threshold=None, threshold_scheduling=False, adder=0.01, MORE_LABELS=False):
 #
@@ -314,14 +314,14 @@
 #         else:
 #             mode = "fine-tuning-" + mode
 #         # mode = "fine-tuning-" + mode
-#         if basic_prompts:
+#         if single_prompt:
 #             str_basic = "-single-prompt"
 #             prompts = basic_create_prompts(class_names)
 #         else:
 #             str_basic = "-mean-prompt"
 #             if MAX_EMB:
 #                 str_basic = "-MAX-prompt"
-#             prompts = create_prompts(class_names, NEW_PROMPTS)
+#             prompts = create_prompts(class_names, OPZ_PROMPTS)
 #         if epochs > 0:
 #             suffix = "-" + MODEL_USED
 #             if SHARED:
@@ -348,7 +348,7 @@
 #         # w_path = w_path + "-DEBUG"
 #         if MORE_LABELS:
 #             w_path += "-MORE-LABELS"
-#         if NEW_PROMPTS:
+#         if OPZ_PROMPTS:
 #             w_path = w_path + "-NEW-PROMPTS"
 #         if UNDER_SAMPLE:
 #             w_path = w_path + "-UNDER-SAMPLE"
@@ -360,7 +360,7 @@
 #         return writer, class_names, train_loader, val_loader, test_loader, prompts
 #
 #     @staticmethod  #  prep for data-incremental
-#     def preprocessing_data_incremental(chex_competition, xrays_position, basic_prompts, batch_size, lr,
+#     def preprocessing_data_incremental(chex_competition, xrays_position, single_prompt, batch_size, lr,
 #                                        parts, epochs, loss_name, mode, CONTINUAL_LEARNING=None, ratio=None,
 #                                        threshold=None, threshold_scheduling=False, adder=0.01):
 #
@@ -392,14 +392,14 @@
 #         else:
 #             mode = "fine-tuning-" + mode
 #         # mode = "fine-tuning-" + mode
-#         if basic_prompts:
+#         if single_prompt:
 #             str_basic = "-single-prompt"
 #             prompts = basic_create_prompts(class_names)
 #         else:
 #             str_basic = "-mean-prompt"
 #             if MAX_EMB:
 #                 str_basic = "-MAX-prompt"
-#             prompts = create_prompts(class_names, NEW_PROMPTS)
+#             prompts = create_prompts(class_names, OPZ_PROMPTS)
 #         if epochs > 0:
 #             suffix = "-" + MODEL_USED
 #             if SHARED:
@@ -426,7 +426,7 @@
 #             raise Exception
 #         # w_path = "./joint-training/rapid_check"
 #         # w_path = w_path + "-DEBUG"
-#         if NEW_PROMPTS:
+#         if OPZ_PROMPTS:
 #             w_path = w_path + "-NEW-PROMPTS"
 #         if UNDER_SAMPLE:
 #             w_path = w_path + "-UNDER-SAMPLE"
@@ -478,7 +478,7 @@
 #                     pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                     pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #                 assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#                 if not self.basic_prompts and not MAX_EMB:
+#                 if not self.single_prompt and not MAX_EMB:
 #                     pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #                 pos_prompt_embedding = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #                 neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
@@ -486,7 +486,7 @@
 #                     neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                     neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #                 assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#                 if not self.basic_prompts and not MAX_EMB:
+#                 if not self.single_prompt and not MAX_EMB:
 #                     neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #                 neg_prompt_embedding = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #                 pos_similarities = torch.matmul(new_embs, pos_prompt_embedding.T)
@@ -565,7 +565,7 @@
 #                 pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                 pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #             assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#             if not self.basic_prompts and not MAX_EMB:
+#             if not self.single_prompt and not MAX_EMB:
 #                 pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #             pos_prompt_embedding = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -574,7 +574,7 @@
 #                 neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                 neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #             assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#             if not self.basic_prompts and not MAX_EMB:
+#             if not self.single_prompt and not MAX_EMB:
 #                 neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #             neg_prompt_embedding = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #             # Calculate the similarities between the image and the positive and negative prompts
@@ -648,8 +648,8 @@
 #                     pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                     pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #                 assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#                 # if not self.basic_prompts and not MAX_EMB:
-#                 if not self.basic_prompts:  #  occhio già lo sai
+#                 # if not self.single_prompt and not MAX_EMB:
+#                 if not self.single_prompt:  #  occhio già lo sai
 #                     pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #                 pos_prompt_embedding = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #                 neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
@@ -657,8 +657,8 @@
 #                     neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                     neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #                 assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#                 # if not self.basic_prompts and not MAX_EMB:
-#                 if not self.basic_prompts:  #  occhio già lo sai
+#                 # if not self.single_prompt and not MAX_EMB:
+#                 if not self.single_prompt:  #  occhio già lo sai
 #                     neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #                 neg_prompt_embedding = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -754,7 +754,7 @@
 #                         pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                         pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #                     assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#                     if not self.basic_prompts and not MAX_EMB:
+#                     if not self.single_prompt and not MAX_EMB:
 #                         pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #                     pos_prompt_embedding = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #                     neg_prompt_embedding = self.bert_encoder.get_embeddings_from_prompt(neg_prompt, normalize=False)
@@ -762,7 +762,7 @@
 #                         neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                         neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #                     assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#                     if not self.basic_prompts and not MAX_EMB:
+#                     if not self.single_prompt and not MAX_EMB:
 #                         neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #                     neg_prompt_embedding = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -977,7 +977,7 @@
 #                         pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                         pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #                     assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#                     if not self.basic_prompts and not MAX_EMB:
+#                     if not self.single_prompt and not MAX_EMB:
 #                         pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #                     pos_prompt_embedding = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -986,7 +986,7 @@
 #                         neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                         neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #                     assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#                     if not self.basic_prompts and not MAX_EMB:
+#                     if not self.single_prompt and not MAX_EMB:
 #                         neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #                     neg_prompt_embedding = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1170,8 +1170,8 @@
 #                 pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                 pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #             assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#             # if not self.basic_prompts and not MAX_EMB:
-#             if not self.basic_prompts: #  occhio perchè c'è il plot
+#             # if not self.single_prompt and not MAX_EMB:
+#             if not self.single_prompt: #  occhio perchè c'è il plot
 #                 pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #             pos_prompt_embedding = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1180,8 +1180,8 @@
 #                 neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                 neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #             assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#             # if not self.basic_prompts and not MAX_EMB: #  ochio perchè c'è il plot
-#             if not self.basic_prompts:
+#             # if not self.single_prompt and not MAX_EMB: #  ochio perchè c'è il plot
+#             if not self.single_prompt:
 #                 neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #             neg_prompt_embedding = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1297,8 +1297,8 @@
 #                 pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                 pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #             assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#             # if not self.basic_prompts and not MAX_EMB:
-#             if not self.basic_prompts: #  occhio già lo sai
+#             # if not self.single_prompt and not MAX_EMB:
+#             if not self.single_prompt: #  occhio già lo sai
 #                 pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #             pos_emb_i = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1311,15 +1311,15 @@
 #                     pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                     pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #                 assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#                 # if not self.basic_prompts and not MAX_EMB:
-#                 if not self.basic_prompts: #  occhio già lo sai
+#                 # if not self.single_prompt and not MAX_EMB:
+#                 if not self.single_prompt: #  occhio già lo sai
 #                     pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #                 pos_emb_j = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
 #                 pos_similarities = torch.matmul(pos_emb_i, pos_emb_j)
 #                 cosine_similarity_heatmap[i, j] = pos_similarities
 #
-#         if self.basic_prompts:
+#         if self.single_prompt:
 #             str_prompts = "-single-prompt"
 #         else:
 #             str_prompts = "-multiple-prompts"
@@ -1365,8 +1365,8 @@
 #                 pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                 pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #             assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#             # if not self.basic_prompts and not MAX_EMB:
-#             if not self.basic_prompts: #  occhio già lo sai
+#             # if not self.single_prompt and not MAX_EMB:
+#             if not self.single_prompt: #  occhio già lo sai
 #                 pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #             pos_emb_i = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1375,8 +1375,8 @@
 #                 neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                 neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #             assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#             # if not self.basic_prompts and not MAX_EMB:
-#             if not self.basic_prompts: #  occhio già lo sai
+#             # if not self.single_prompt and not MAX_EMB:
+#             if not self.single_prompt: #  occhio già lo sai
 #                 neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #             neg_emb_i = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1390,8 +1390,8 @@
 #                     pos_prompt_embedding = pos_prompt_embedding.to(self.device)
 #                     pos_prompt_embedding = self.text_adapter(pos_prompt_embedding)
 #                 assert pos_prompt_embedding.shape[0] == len(pos_prompt)
-#                 # if not self.basic_prompts and not MAX_EMB:
-#                 if not self.basic_prompts: #  occhio già lo sai
+#                 # if not self.single_prompt and not MAX_EMB:
+#                 if not self.single_prompt: #  occhio già lo sai
 #                     pos_prompt_embedding = pos_prompt_embedding.mean(dim=0)
 #                 pos_emb_j = F.normalize(pos_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1400,8 +1400,8 @@
 #                     neg_prompt_embedding = neg_prompt_embedding.to(self.device)
 #                     neg_prompt_embedding = self.text_adapter(neg_prompt_embedding)
 #                 assert neg_prompt_embedding.shape[0] == len(neg_prompt)
-#                 # if not self.basic_prompts and not MAX_EMB:
-#                 if not self.basic_prompts: #  occhio già lo sai
+#                 # if not self.single_prompt and not MAX_EMB:
+#                 if not self.single_prompt: #  occhio già lo sai
 #                     neg_prompt_embedding = neg_prompt_embedding.mean(dim=0)
 #                 neg_emb_j = F.normalize(neg_prompt_embedding,  dim=-1, p=2).to(self.device)
 #
@@ -1417,7 +1417,7 @@
 #                 neg_similarities_right = torch.matmul(neg_emb_i, neg_emb_j)
 #                 cosine_similarity_heatmap[i * 2 + 1, j * 2 + 1] = neg_similarities_right
 #
-#         if self.basic_prompts:
+#         if self.single_prompt:
 #             str_prompts = "-single-prompt"
 #         else:
 #             str_prompts = "-multiple-prompts"
